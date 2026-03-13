@@ -1,0 +1,77 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        String      @id @default(uuid())
+  email     String      @unique
+  password  String
+  createdAt DateTime    @default(now())
+  updatedAt DateTime    @updatedAt
+  alerts    AlertRule[]
+}
+
+model TrackedItem {
+  id               String              @id @default(uuid())
+  cardId           String?             @unique
+  name             String
+  setName          String
+  number           String?
+  type             String              @default("CARD")
+  imageUrl         String?
+  priorityScore    Float               @default(0)
+  lastPriceCheckAt DateTime?
+  createdAt        DateTime            @default(now())
+  updatedAt        DateTime            @updatedAt
+  alerts           AlertRule[]
+  prices           PriceSnapshot[]
+  analysis         TechnicalAnalysis[]
+}
+
+model PriceSnapshot {
+  id             String      @id @default(uuid())
+  trackedItemId  String
+  date           DateTime    @default(now())
+  fairValue      Float?
+  tcgplayerPrice Float?
+  ebayPrice      Float?
+  volume         Int?
+  createdAt      DateTime    @default(now())
+  item           TrackedItem @relation(fields: [trackedItemId], references: [id], onDelete: Cascade)
+
+  @@index([trackedItemId, date])
+}
+
+model TechnicalAnalysis {
+  id            String      @id @default(uuid())
+  trackedItemId String
+  date          DateTime    @default(now())
+  ema8          Float?
+  ema20         Float?
+  ema50         Float?
+  macd          Float?
+  signalLine    Float?
+  trend         String      @default("NEUTRAL")
+  createdAt     DateTime    @default(now())
+  item          TrackedItem @relation(fields: [trackedItemId], references: [id], onDelete: Cascade)
+
+  @@index([trackedItemId, date])
+}
+
+model AlertRule {
+  id            String      @id @default(uuid())
+  userId        String
+  trackedItemId String
+  condition     String
+  thresholdData String
+  channels      String
+  isActive      Boolean     @default(true)
+  createdAt     DateTime    @default(now())
+  item          TrackedItem @relation(fields: [trackedItemId], references: [id], onDelete: Cascade)
+  user          User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+}

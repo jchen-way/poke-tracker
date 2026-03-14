@@ -151,6 +151,17 @@
   font-size: 1.25rem;
 }
 
+.section-title-link {
+  color: inherit;
+  text-decoration: none;
+}
+
+.section-title-link:hover h3 {
+  text-decoration: underline;
+  text-decoration-thickness: 2px;
+  text-underline-offset: 0.18em;
+}
+
 .chart-controls {
   display: flex;
   gap: 0.5rem;

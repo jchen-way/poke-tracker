@@ -9,6 +9,7 @@ import {
   hasBuyOpportunity,
 } from '../../../lib/dashboardSignals';
 import { buildEbaySearchUrl } from '../../../lib/ebaySearch';
+import { buildTcgplayerSearchUrl } from '../../../lib/tcgplayerSearch';
 
 export const dynamic = 'force-dynamic';
 
@@ -27,6 +28,11 @@ export default async function OpportunitiesPage() {
         cardId: snapshot.item.cardId ?? null,
         value: fairValue - ebayLowPrice,
         reason: `Consensus ${formatMoney(fairValue)} vs matched eBay listing ${formatMoney(ebayLowPrice)} with eBay median ${formatMoney(ebayMedianPrice)}.`,
+        tcgplayerUrl: buildTcgplayerSearchUrl({
+          name: snapshot.item.name,
+          setName: snapshot.item.setName,
+          localId: snapshot.item.number ?? null,
+        }),
         ebayUrl:
           snapshot.ebayLowListingUrl ??
           buildEbaySearchUrl({
@@ -72,6 +78,9 @@ export default async function OpportunitiesPage() {
                     ) : null}
                     <a className="btn-retro small" href={opportunity.ebayUrl} rel="noreferrer" target="_blank">
                       Open eBay
+                    </a>
+                    <a className="btn-retro small" href={opportunity.tcgplayerUrl} rel="noreferrer" target="_blank">
+                      Check TCGplayer
                     </a>
                   </div>
                 </div>

@@ -101,7 +101,7 @@ export default async function Home({
       </header>
 
       <div className="metrics-grid">
-        <Link className="metric-card retro-panel metric-link" id="metric-market-trend" href="/dashboard/signals">
+        <div className="metric-card retro-panel" id="metric-market-trend">
           <div className="metric-icon" style={{ color: 'var(--color-accent-cyan)' }}>
             <Activity size={24} />
           </div>
@@ -128,7 +128,7 @@ export default async function Home({
               </>
             )}
           </div>
-        </Link>
+        </div>
 
         <Link className="metric-card retro-panel metric-link" id="metric-opportunities" href="/dashboard/opportunities">
           <div className="metric-icon" style={{ color: 'var(--color-accent-gold)' }}>
@@ -151,7 +151,7 @@ export default async function Home({
             <span className="metric-label">Price Discrepancies</span>
             <span className="metric-value">{metricSummary.discrepancies} High Priority</span>
             <span className="metric-subvalue">
-              Based on {metricSummary.discrepancyCoverage} cards with both eBay and TCGplayer pricing.
+              Based on {metricSummary.discrepancyCoverage} cards with trusted eBay listing coverage and TCGplayer pricing.
             </span>
           </div>
         </Link>
@@ -237,7 +237,9 @@ export default async function Home({
 
         <aside className="alerts-sidebar retro-panel" id="recent-alerts-panel">
           <div className="section-header">
-            <h3>Recent Signals</h3>
+            <Link className="section-title-link" href="/dashboard/signals">
+              <h3>Recent Signals</h3>
+            </Link>
           </div>
           <div className="alerts-list">
             {signals.length ? (

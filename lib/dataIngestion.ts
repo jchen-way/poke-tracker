@@ -217,23 +217,6 @@ export async function syncPokemonMarketData(options: SyncOptions = {}) {
   return results;
 }
 
-async function runTechnicalAnalysis(
-  trackedItemId: string,
-  newSnapshot: { fairValue: number | null },
-) {
-  await prisma.technicalAnalysis.create({
-    data: {
-      trackedItemId,
-      ema8: (newSnapshot.fairValue || 0) * 0.98,
-      ema20: (newSnapshot.fairValue || 0) * 0.95,
-      ema50: (newSnapshot.fairValue || 0) * 0.9,
-      trend: 'UPTREND',
-      macd: 0.5,
-      signalLine: 0.4,
-    },
-  });
-}
-
 export async function getPriceSeriesForCard(cardId: string) {
   const snapshots = await prisma.priceSnapshot.findMany({
     where: {
@@ -314,8 +297,6 @@ async function createSnapshot({
       date,
     },
   });
-
-  await runTechnicalAnalysis(trackedItemId, priceSnap);
   return priceSnap;
 }
 
@@ -808,6 +789,15 @@ function chooseChartPrice(snapshot: {
     snapshot.ebayLowPrice ??
     0
   );
+}
+
+export function getDisplayPrice(snapshot: {
+  fairValue: number | null;
+  tcgplayerPrice: number | null;
+  ebayPrice: number | null;
+  ebayLowPrice: number | null;
+}) {
+  return chooseChartPrice(snapshot);
 }
 
 function hasEbayCredentials() {

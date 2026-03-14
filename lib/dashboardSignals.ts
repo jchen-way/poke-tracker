@@ -1,4 +1,6 @@
 import { buildEbaySearchUrl } from './ebaySearch';
+import { buildTcgplayerSearchUrl } from './tcgplayerSearch';
+import { getDisplayPrice } from './dataIngestion';
 
 export type DashboardSnapshot = {
   id: string;
@@ -28,6 +30,7 @@ export type Signal = {
   value: string;
   cardId: string | null;
   ebayUrl: string;
+  tcgplayerUrl: string;
 };
 
 export const TREND_MIN_POINTS = 3;
@@ -65,6 +68,11 @@ export function buildSignals(snapshots: DashboardSnapshot[], limit = 5): Signal[
           setName: snapshot.item.setName,
           localId: snapshot.item.number ?? null,
         });
+      const tcgplayerUrl = buildTcgplayerSearchUrl({
+        name: snapshot.item.name,
+        setName: snapshot.item.setName,
+        localId: snapshot.item.number ?? null,
+      });
 
       if (hasBuyOpportunity(snapshot)) {
         const fairValue = snapshot.fairValue ?? 0;
@@ -78,6 +86,7 @@ export function buildSignals(snapshots: DashboardSnapshot[], limit = 5): Signal[
           value: formatMoney(fairValue - ebayLow),
           cardId: snapshot.item.cardId ?? null,
           ebayUrl,
+          tcgplayerUrl,
         });
       }
 
@@ -94,6 +103,7 @@ export function buildSignals(snapshots: DashboardSnapshot[], limit = 5): Signal[
           value: formatPercent(delta),
           cardId: snapshot.item.cardId ?? null,
           ebayUrl,
+          tcgplayerUrl,
         });
       }
 
@@ -245,7 +255,7 @@ function median(values: number[]) {
 }
 
 function getSnapshotPrice(snapshot: DashboardSnapshot) {
-  return snapshot.fairValue ?? snapshot.tcgplayerPrice ?? snapshot.ebayPrice;
+  return getDisplayPrice(snapshot);
 }
 
 export function formatMoney(value: number) {

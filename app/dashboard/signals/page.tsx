@@ -45,6 +45,9 @@ export default async function SignalsPage() {
                     <a className="btn-retro small" href={signal.ebayUrl} rel="noreferrer" target="_blank">
                       Open eBay
                     </a>
+                    <a className="btn-retro small" href={signal.tcgplayerUrl} rel="noreferrer" target="_blank">
+                      Check TCGplayer
+                    </a>
                   </div>
                 </div>
                 <div className={`detail-value ${signal.tone === 'arbitrage' ? 'alert-price highlight' : ''}`}>

@@ -10,6 +10,7 @@ import {
   hasHighPriorityDiscrepancy,
 } from '../../../lib/dashboardSignals';
 import { buildEbaySearchUrl } from '../../../lib/ebaySearch';
+import { buildTcgplayerSearchUrl } from '../../../lib/tcgplayerSearch';
 
 export const dynamic = 'force-dynamic';
 
@@ -31,6 +32,11 @@ export default async function DiscrepanciesPage() {
         reason: `TCGplayer ${formatMoney(tcgplayerPrice)} vs matched eBay listing ${formatMoney(ebayLowPrice)}.`,
         value: formatPercent(delta),
         spreadValue: spread,
+        tcgplayerUrl: buildTcgplayerSearchUrl({
+          name: snapshot.item.name,
+          setName: snapshot.item.setName,
+          localId: snapshot.item.number ?? null,
+        }),
         ebayUrl:
           snapshot.ebayLowListingUrl ??
           buildEbaySearchUrl({
@@ -48,7 +54,7 @@ export default async function DiscrepanciesPage() {
         <div>
           <h1>Price Discrepancies</h1>
           <p>
-            Cards where eBay median and TCGplayer are far enough apart to deserve manual review.
+            Cards where a matched eBay listing and TCGplayer are far enough apart to deserve manual review.
           </p>
         </div>
         <Link className="btn-retro blue" href="/dashboard">
@@ -76,6 +82,9 @@ export default async function DiscrepanciesPage() {
                     ) : null}
                     <a className="btn-retro small" href={discrepancy.ebayUrl} rel="noreferrer" target="_blank">
                       Open eBay
+                    </a>
+                    <a className="btn-retro small" href={discrepancy.tcgplayerUrl} rel="noreferrer" target="_blank">
+                      Check TCGplayer
                     </a>
                   </div>
                 </div>

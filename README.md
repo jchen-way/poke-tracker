@@ -9,6 +9,8 @@ Create `tracker_app/.env` from `tracker_app/.env.example` and set:
 - `DATABASE_URL`: your hosted Postgres connection string
 - `AUTH_SECRET`: a long random string used to sign login sessions
 - `CRON_SECRET`: a long random string used to authorize scheduled ingestion requests
+- `EBAY_ACCOUNT_DELETION_ENDPOINT`: your deployed eBay notification callback URL
+- `EBAY_VERIFICATION_TOKEN`: the token you enter in the eBay developer console
 - `TCGDEX_LANGUAGE`: API language, usually `en`
 - `EBAY_OAUTH_TOKEN`: optional, only if you want extra eBay pricing enrichment
 
@@ -48,10 +50,12 @@ curl -H "x-cron-secret: YOUR_CRON_SECRET" "http://localhost:3000/api/cron/ingest
 ```
 
 This will:
+
 - discover or update metadata for 200 cards from TCGdex
 - then refresh prices for the next 50 queued tracked cards
 
 Recommended production pattern:
+
 - run a small `discoverLimit` job occasionally to grow the catalog
 - run frequent `limit` refresh jobs to keep prices current
 
@@ -71,8 +75,26 @@ Set these repository secrets before enabling it:
 - `CRON_SECRET`: the same value used in your app environment
 
 The workflow runs:
+
 - every 6 hours for price refresh batches
 - every Sunday at 3:00 UTC for a larger catalog discovery batch
+
+## eBay Account Deletion Callback
+
+If you enable eBay production keys, configure the notification endpoint in eBay as:
+
+```text
+https://your-app.vercel.app/api/ebay/account-deletion
+```
+
+This app includes that callback route at route.ts
+
+Required env vars:
+
+```env
+EBAY_ACCOUNT_DELETION_ENDPOINT=https://your-app.vercel.app/api/ebay/account-deletion
+EBAY_VERIFICATION_TOKEN=your_verification_token_from_ebay_console
+```
 
 The sync will:
 

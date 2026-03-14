@@ -392,8 +392,6 @@
 }
 
 .alert-indicator.buy { background: var(--color-trend-up); }
-.alert-indicator.sell,
-.alert-indicator.watch { background: var(--color-trend-down); }
 .alert-indicator.arbitrage { background: var(--color-accent-gold); }
 
 .alert-details {
@@ -409,8 +407,6 @@
 }
 
 .alert-indicator.buy + .alert-details strong { color: var(--color-trend-up); }
-.alert-indicator.sell + .alert-details strong,
-.alert-indicator.watch + .alert-details strong { color: var(--color-trend-down); }
 .alert-indicator.arbitrage + .alert-details strong { color: var(--color-accent-gold); }
 
 .alert-reason {

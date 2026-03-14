@@ -31,6 +31,8 @@ type DashboardSnapshot = {
   fairValue: number | null;
   tcgplayerPrice: number | null;
   ebayPrice: number | null;
+  ebayLowPrice: number | null;
+  isSynthetic: boolean;
   item: {
     name: string;
     setName: string;
@@ -55,7 +57,7 @@ export default async function Home({
   const activeRange = resolvedSearchParams?.range ?? '1M';
   const searchQuery = resolvedSearchParams?.q?.trim() ?? '';
 
-  const [trackedItems, trackedItemCount, searchResults, dashboardSnapshots] = await Promise.all([
+  const [trackedItems, trackedItemCount, searchResults] = await Promise.all([
     prisma.trackedItem.findMany({
       orderBy: { updatedAt: 'desc' },
     }),
@@ -73,21 +75,27 @@ export default async function Home({
       take: 8,
       orderBy: { updatedAt: 'desc' },
     }),
-    prisma.priceSnapshot.findMany({
-      where: {
-        item: {
-          cardId: {
-            not: null,
-          },
+  ]);
+
+  const dashboardSnapshotTake = Math.min(
+    Math.max(trackedItemCount * TREND_MIN_POINTS, 3000),
+    12000,
+  );
+
+  const dashboardSnapshots = await prisma.priceSnapshot.findMany({
+    where: {
+      item: {
+        cardId: {
+          not: null,
         },
       },
-      include: {
-        item: true,
-      },
-      orderBy: { date: 'desc' },
-      take: 1500,
-    }),
-  ]);
+    },
+    include: {
+      item: true,
+    },
+    orderBy: { date: 'desc' },
+    take: dashboardSnapshotTake,
+  });
 
   const fallbackCardId = trackedItems[0]?.cardId ?? searchResults[0]?.cardId ?? undefined;
   const activeCardId = resolvedSearchParams?.cardId ?? fallbackCardId;
@@ -99,8 +107,9 @@ export default async function Home({
 
   const series = activeCardId ? await getPriceSeriesForCard(activeCardId) : [];
   const chartData = filterSeriesByRange(series, activeRange);
-  const metricSummary = buildMetricSummary(dashboardSnapshots);
-  const signals = buildSignals(dashboardSnapshots);
+  const realSnapshots = dashboardSnapshots.filter((snapshot) => !snapshot.isSynthetic);
+  const metricSummary = buildMetricSummary(realSnapshots);
+  const signals = buildSignals(realSnapshots);
 
   return (
     <div className="dashboard fade-in">
@@ -132,16 +141,21 @@ export default async function Home({
             <span className="metric-label">Market Trend</span>
             {metricSummary.hasTrend ? (
               <span className="metric-value">
-                {metricSummary.trendLabel}{' '}
-                <span className={metricSummary.delta >= 0 ? 'trend-up' : 'trend-down'}>
-                  {formatPercent(metricSummary.delta)}
-                </span>
+                {metricSummary.trendLabel}
+                {metricSummary.trendLabel === 'Flat' ? null : (
+                  <>
+                    {' '}
+                    <span className={metricSummary.delta >= 0 ? 'trend-up' : 'trend-down'}>
+                      {formatPercent(metricSummary.delta)}
+                    </span>
+                  </>
+                )}
               </span>
             ) : (
               <>
                 <span className="metric-value">Insufficient history</span>
                 <span className="metric-subvalue">
-                  Need at least {TREND_MIN_CARDS} cards with {TREND_MIN_POINTS}+ snapshots across {TREND_WINDOW_DAYS} days.
+                  Need at least {TREND_MIN_CARDS} cards with {TREND_MIN_POINTS}+ snapshots to estimate a market move.
                 </span>
               </>
             )}
@@ -155,6 +169,9 @@ export default async function Home({
           <div className="metric-content">
             <span className="metric-label">Active Opportunities</span>
             <span className="metric-value">{metricSummary.opportunities} Cards</span>
+            <span className="metric-subvalue">
+              Based on {metricSummary.opportunityCoverage} cards with eBay low-listing matches.
+            </span>
           </div>
         </div>
 
@@ -165,6 +182,9 @@ export default async function Home({
           <div className="metric-content">
             <span className="metric-label">Price Discrepancies</span>
             <span className="metric-value">{metricSummary.discrepancies} High Priority</span>
+            <span className="metric-subvalue">
+              Based on {metricSummary.discrepancyCoverage} cards with both eBay and TCGplayer pricing.
+            </span>
           </div>
         </div>
       </div>
@@ -228,7 +248,7 @@ export default async function Home({
           ) : null}
 
           <div className="chart-container-placeholder">
-            <PriceChart data={chartData} range={activeRange} />
+            <PriceChart data={chartData} />
           </div>
 
           <div className="technical-indicators">
@@ -286,7 +306,6 @@ function filterSeriesByRange(
 
   const lastDate = new Date(series[series.length - 1].date);
   const daysForRange: Record<string, number> = {
-    '1D': 1,
     '1W': 7,
     '1M': 30,
   };
@@ -310,18 +329,22 @@ function buildMetricSummary(
   snapshots: DashboardSnapshot[],
 ) {
   const latestByCard = getLatestSnapshotsByCard(snapshots);
-  const discrepancies = latestByCard.filter(hasArbitrageSpread).length;
-  const opportunities = discrepancies;
+  const discrepancies = latestByCard.filter(hasHighPriorityDiscrepancy).length;
+  const opportunities = latestByCard.filter(hasBuyOpportunity).length;
   const trendCandidates = getTrendCandidates(snapshots);
   const delta =
-    trendCandidates.length >= TREND_MIN_CARDS
-      ? trendCandidates.reduce((sum, move) => sum + move, 0) / trendCandidates.length
-      : 0;
+    trendCandidates.length >= TREND_MIN_CARDS ? median(trendCandidates) : 0;
 
   return {
     delta,
     opportunities,
     discrepancies,
+    opportunityCoverage: latestByCard.filter(
+      (snapshot) => snapshot.fairValue != null && snapshot.ebayLowPrice != null,
+    ).length,
+    discrepancyCoverage: latestByCard.filter(
+      (snapshot) => snapshot.tcgplayerPrice != null && snapshot.ebayPrice != null,
+    ).length,
     hasTrend: trendCandidates.length >= TREND_MIN_CARDS,
     trendLabel: delta >= 2 ? 'Bullish' : delta <= -2 ? 'Cooling' : 'Flat',
   };
@@ -331,27 +354,53 @@ function buildSignals(
   snapshots: DashboardSnapshot[],
 ): Signal[] {
   return getLatestSnapshotsByCard(snapshots)
-    .filter(hasArbitrageSpread)
-    .map((snapshot) => {
-      const tcgPrice = snapshot.tcgplayerPrice ?? 0;
-      const ebayPrice = snapshot.ebayPrice ?? 0;
-      const delta = ((tcgPrice - ebayPrice) / Math.max(tcgPrice, ebayPrice)) * 100;
+    .flatMap((snapshot) => {
+      const title = `${snapshot.item.name} (${snapshot.item.setName})`;
+      const signals: Signal[] = [];
 
-      return {
-        id: `${snapshot.id}-arb`,
-        label: 'ARBITRAGE' as const,
-        tone: 'arbitrage' as const,
-        title: `${snapshot.item.name} (${snapshot.item.setName})`,
-        reason: `TCGplayer ${formatMoney(tcgPrice)} vs eBay ${formatMoney(ebayPrice)}.`,
-        value: formatPercent(delta),
-      };
+      if (hasBuyOpportunity(snapshot)) {
+        const fairValue = snapshot.fairValue ?? 0;
+        const ebayPrice = snapshot.ebayLowPrice ?? 0;
+
+        signals.push({
+          id: `${snapshot.id}-buy`,
+          label: 'BUY SIGNAL',
+          tone: 'buy',
+          title,
+          reason: `Consensus value ${formatMoney(fairValue)} vs lowest eBay listing ${formatMoney(ebayPrice)}.`,
+          value: formatMoney(fairValue - ebayPrice),
+        });
+      }
+
+      if (hasArbitrageSpread(snapshot)) {
+        const tcgPrice = snapshot.tcgplayerPrice ?? 0;
+        const ebayPrice = snapshot.ebayPrice ?? 0;
+        const delta = ((tcgPrice - ebayPrice) / Math.max(tcgPrice, ebayPrice)) * 100;
+
+        signals.push({
+          id: `${snapshot.id}-arb`,
+          label: 'ARBITRAGE',
+          tone: 'arbitrage',
+          title,
+          reason: `TCGplayer ${formatMoney(tcgPrice)} vs eBay ${formatMoney(ebayPrice)}.`,
+          value: formatPercent(delta),
+        });
+      }
+
+      return signals;
+    })
+    .sort((left, right) => {
+      const leftValue = parseSignalValue(left.value);
+      const rightValue = parseSignalValue(right.value);
+      return rightValue - leftValue;
     })
     .slice(0, 5);
 }
 
-const TREND_WINDOW_DAYS = 30;
 const TREND_MIN_POINTS = 3;
 const TREND_MIN_CARDS = 5;
+const TREND_MIN_PRICE = 5;
+const TREND_MAX_CARDS = 60;
 
 function getLatestSnapshotsByCard(snapshots: DashboardSnapshot[]) {
   const latestByCard = new Map<string, DashboardSnapshot>();
@@ -368,22 +417,59 @@ function getLatestSnapshotsByCard(snapshots: DashboardSnapshot[]) {
 function hasArbitrageSpread(snapshot: DashboardSnapshot) {
   const tcgPrice = snapshot.tcgplayerPrice;
   const ebayPrice = snapshot.ebayPrice;
+  const absoluteSpread =
+    tcgPrice != null && ebayPrice != null ? Math.abs(tcgPrice - ebayPrice) : 0;
 
   return (
     tcgPrice != null &&
     ebayPrice != null &&
+    absoluteSpread >= 0.75 &&
+    Math.abs(tcgPrice - ebayPrice) / Math.max(tcgPrice, ebayPrice) >= 0.1
+  );
+}
+
+function hasHighPriorityDiscrepancy(snapshot: DashboardSnapshot) {
+  const tcgPrice = snapshot.tcgplayerPrice;
+  const ebayPrice = snapshot.ebayPrice;
+  const absoluteSpread =
+    tcgPrice != null && ebayPrice != null ? Math.abs(tcgPrice - ebayPrice) : 0;
+
+  return (
+    tcgPrice != null &&
+    ebayPrice != null &&
+    absoluteSpread >= 1 &&
     Math.abs(tcgPrice - ebayPrice) / Math.max(tcgPrice, ebayPrice) >= 0.12
   );
 }
 
-function getTrendCandidates(snapshots: DashboardSnapshot[]) {
-  const cutoff = new Date();
-  cutoff.setDate(cutoff.getDate() - TREND_WINDOW_DAYS);
+function hasBuyOpportunity(snapshot: DashboardSnapshot) {
+  const fairValue = snapshot.fairValue;
+  const ebayPrice = snapshot.ebayLowPrice;
 
+  if (fairValue == null || ebayPrice == null) {
+    return false;
+  }
+
+  const spread = fairValue - ebayPrice;
+  return spread >= 0.75 && fairValue > ebayPrice * 1.08;
+}
+
+function getTrendCandidates(snapshots: DashboardSnapshot[]) {
   const grouped = new Map<string, DashboardSnapshot[]>();
+  const latestByCard = getLatestSnapshotsByCard(snapshots);
+  const eligibleCardIds = new Set(
+    latestByCard
+      .filter((snapshot) => {
+        const currentPrice = getSnapshotPrice(snapshot);
+        return currentPrice != null && currentPrice >= TREND_MIN_PRICE;
+      })
+      .sort((left, right) => (getSnapshotPrice(right) ?? 0) - (getSnapshotPrice(left) ?? 0))
+      .slice(0, TREND_MAX_CARDS)
+      .map((snapshot) => snapshot.trackedItemId),
+  );
 
   for (const snapshot of snapshots) {
-    if (snapshot.date < cutoff) {
+    if (!eligibleCardIds.has(snapshot.trackedItemId)) {
       continue;
     }
 
@@ -412,6 +498,17 @@ function getTrendCandidates(snapshots: DashboardSnapshot[]) {
   return moves;
 }
 
+function median(values: number[]) {
+  const sorted = [...values].sort((left, right) => left - right);
+  const middle = Math.floor(sorted.length / 2);
+
+  if (sorted.length % 2 === 0) {
+    return (sorted[middle - 1] + sorted[middle]) / 2;
+  }
+
+  return sorted[middle];
+}
+
 function getSnapshotPrice(snapshot: DashboardSnapshot) {
   return snapshot.fairValue ?? snapshot.tcgplayerPrice ?? snapshot.ebayPrice;
 }
@@ -427,6 +524,10 @@ function formatMoney(value: number) {
 function formatPercent(value: number) {
   const prefix = value > 0 ? '+' : '';
   return `${prefix}${value.toFixed(1)}%`;
+}
+
+function parseSignalValue(value: string) {
+  return Number.parseFloat(value.replace(/[^0-9.-]/g, '')) || 0;
 }
 
 function mapSearchItem(item: SearchItem) {

@@ -16,6 +16,7 @@ export default async function Navbar() {
       <div className="nav-links">
         <Link href="/dashboard" className="nav-link">Tracker</Link>
         <Link href="/collections" className="nav-link">Collections</Link>
+        {user ? <Link href="/watchlist" className="nav-link">Watchlist</Link> : null}
 
         {user ? (
           <div className="nav-auth">

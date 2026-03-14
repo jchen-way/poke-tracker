@@ -17,11 +17,21 @@ const TCGDEX_DETAIL_BATCH_SIZE = Math.min(
   parsePositiveInt(process.env.TCGDEX_DETAIL_BATCH_SIZE, 10),
   25,
 );
-const EBAY_OAUTH_TOKEN = process.env.EBAY_OAUTH_TOKEN;
+const EBAY_CLIENT_ID = process.env.EBAY_CLIENT_ID;
+const EBAY_CLIENT_SECRET = process.env.EBAY_CLIENT_SECRET;
+const EBAY_ENV = process.env.EBAY_ENV ?? 'production';
+const EBAY_MARKETPLACE_ID = process.env.EBAY_MARKETPLACE_ID ?? 'EBAY_US';
 const EBAY_ENRICHMENT_LIMIT = parsePositiveInt(
   process.env.EBAY_ENRICHMENT_LIMIT,
-  0,
+  CARD_SYNC_LIMIT,
 );
+
+let ebayAppTokenCache:
+  | {
+      accessToken: string;
+      expiresAt: number;
+    }
+  | null = null;
 
 type MaybeNumber = number | null | undefined;
 
@@ -48,6 +58,18 @@ type TcgdexTcgplayerVariant = {
   highPrice?: number;
   marketPrice?: number;
   directLowPrice?: number;
+};
+
+type EbayMarketSnapshot = {
+  lowPrice: number | null;
+  medianPrice: number | null;
+  sampleSize: number;
+};
+
+type EbaySearchContext = {
+  cardName: string;
+  setName: string | null;
+  localId: string | null;
 };
 
 type SyncOptions = {
@@ -85,6 +107,7 @@ export async function syncPokemonMarketData(options: SyncOptions = {}) {
       },
     },
     orderBy: [
+      { watchlistEntries: { _count: 'desc' } },
       { priorityScore: 'desc' },
       { lastPriceCheckAt: { sort: 'asc', nulls: 'first' } },
       { updatedAt: 'asc' },
@@ -122,17 +145,26 @@ export async function syncPokemonMarketData(options: SyncOptions = {}) {
 
     const tcgplayerPrice = extractTcgplayerPrice(card);
     const cardmarketPrice = extractCardmarketPrice(card);
-    const ebayPrice =
-      EBAY_OAUTH_TOKEN && index < EBAY_ENRICHMENT_LIMIT
-        ? await fetchEbayMarketPrice(buildEbaySearchQuery(card))
+    const ebayMarket =
+      hasEbayCredentials() && index < EBAY_ENRICHMENT_LIMIT
+        ? await fetchEbayMarketSnapshot({
+            query: buildEbaySearchQuery(card),
+            context: {
+              cardName: card.name,
+              setName: card.set?.name ?? null,
+              localId: card.localId ?? null,
+            },
+          })
         : null;
-    const fairValue = firstFiniteNumber([
+    const ebayPrice = ebayMarket?.medianPrice ?? null;
+    const ebayLowPrice = ebayMarket?.lowPrice ?? null;
+    const fairValue = calculateFairValue({
       tcgplayerPrice,
       cardmarketPrice,
-      ebayPrice,
-    ]);
+      ebayMedianPrice: ebayPrice,
+    });
 
-    if (fairValue == null && tcgplayerPrice == null && ebayPrice == null) {
+    if (fairValue == null && tcgplayerPrice == null && ebayPrice == null && ebayLowPrice == null) {
       continue;
     }
 
@@ -148,6 +180,7 @@ export async function syncPokemonMarketData(options: SyncOptions = {}) {
         fairValue,
         tcgplayerPrice,
         ebayPrice,
+        ebayLowPrice,
         historyDays,
         historyPoints,
       });
@@ -158,6 +191,8 @@ export async function syncPokemonMarketData(options: SyncOptions = {}) {
       fairValue,
       tcgplayerPrice,
       ebayPrice,
+      ebayLowPrice,
+      isSynthetic: false,
       date: new Date(),
     });
 
@@ -239,12 +274,16 @@ async function createSnapshot({
   fairValue,
   tcgplayerPrice,
   ebayPrice,
+  ebayLowPrice,
+  isSynthetic,
   date,
 }: {
   trackedItemId: string;
   fairValue: number | null;
   tcgplayerPrice: number | null;
   ebayPrice: number | null;
+  ebayLowPrice: number | null;
+  isSynthetic: boolean;
   date: Date;
 }) {
   const priceSnap = await prisma.priceSnapshot.create({
@@ -253,6 +292,8 @@ async function createSnapshot({
       fairValue,
       tcgplayerPrice,
       ebayPrice,
+      ebayLowPrice,
+      isSynthetic,
       volume: null,
       date,
     },
@@ -267,6 +308,7 @@ async function seedHistoricalSnapshots({
   fairValue,
   tcgplayerPrice,
   ebayPrice,
+  ebayLowPrice,
   historyDays,
   historyPoints,
 }: {
@@ -274,6 +316,7 @@ async function seedHistoricalSnapshots({
   fairValue: number;
   tcgplayerPrice: number | null;
   ebayPrice: number | null;
+  ebayLowPrice: number | null;
   historyDays: number;
   historyPoints: number;
 }) {
@@ -292,6 +335,9 @@ async function seedHistoricalSnapshots({
       tcgplayerPrice:
         tcgplayerPrice != null ? applySyntheticDrift(tcgplayerPrice, progress) : null,
       ebayPrice: ebayPrice != null ? applySyntheticDrift(ebayPrice, progress * 0.85) : null,
+      ebayLowPrice:
+        ebayLowPrice != null ? applySyntheticDrift(ebayLowPrice, progress * 0.8) : null,
+      isSynthetic: true,
       date: syntheticDate,
     });
   }
@@ -488,21 +534,35 @@ function parsePositiveInt(value: string | undefined, fallback: number): number {
   return parsed;
 }
 
-async function fetchEbayMarketPrice(query: string): Promise<number | null> {
-  if (!EBAY_OAUTH_TOKEN) {
-    console.log('[eBay] missing EBAY_OAUTH_TOKEN, skipping');
+async function fetchEbayMarketSnapshot({
+  query,
+  context,
+}: {
+  query: string;
+  context: EbaySearchContext;
+}): Promise<EbayMarketSnapshot | null> {
+  if (!hasEbayCredentials()) {
+    console.log('[eBay] missing EBAY_CLIENT_ID/EBAY_CLIENT_SECRET, skipping');
     return null;
   }
 
   try {
-    const url = new URL('https://api.ebay.com/buy/browse/v1/item_summary/search');
+    const accessToken = await getEbayApplicationToken();
+    if (!accessToken) {
+      return null;
+    }
+
+    const url = new URL(`${getEbayApiBaseUrl()}/buy/browse/v1/item_summary/search`);
     url.searchParams.set('q', query);
     url.searchParams.set('limit', '20');
+    url.searchParams.set('sort', 'price');
+    url.searchParams.set('filter', 'buyingOptions:{FIXED_PRICE}');
 
     const res = await fetch(url.toString(), {
       headers: {
-        Authorization: `Bearer ${EBAY_OAUTH_TOKEN}`,
+        Authorization: `Bearer ${accessToken}`,
         'Content-Type': 'application/json',
+        'X-EBAY-C-MARKETPLACE-ID': EBAY_MARKETPLACE_ID,
       },
     });
 
@@ -511,19 +571,216 @@ async function fetchEbayMarketPrice(query: string): Promise<number | null> {
       return null;
     }
 
-    const json: { itemSummaries?: Array<{ price?: { value?: string } }> } =
+    const json: {
+      itemSummaries?: Array<{
+        title?: string;
+        price?: { value?: string };
+        shippingOptions?: Array<{ shippingCost?: { value?: string } }>;
+      }>;
+    } =
       await res.json();
-    const items = json.itemSummaries ?? [];
+    const items = (json.itemSummaries ?? []).filter((item) =>
+      isRelevantEbayListing(item.title ?? '', context),
+    );
     if (!items.length) return null;
 
     const prices = items
-      .map((item) => Number(item.price?.value))
+      .map((item) => {
+        const itemPrice = Number(item.price?.value);
+        const shipping = Number(item.shippingOptions?.[0]?.shippingCost?.value ?? 0);
+        const total = itemPrice + shipping;
+        return Number.isFinite(total) ? total : Number.NaN;
+      })
       .filter((value) => Number.isFinite(value));
 
     if (!prices.length) return null;
-    return Math.min(...prices);
+
+    const sorted = [...prices].sort((left, right) => left - right);
+    const middle = Math.floor(sorted.length / 2);
+    const medianPrice =
+      sorted.length % 2 === 0
+        ? (sorted[middle - 1] + sorted[middle]) / 2
+        : sorted[middle];
+
+    return {
+      lowPrice: Number(sorted[0].toFixed(2)),
+      medianPrice: Number(medianPrice.toFixed(2)),
+      sampleSize: sorted.length,
+    };
   } catch (err) {
     console.log('[eBay] fetch error', err);
     return null;
   }
+}
+
+function isRelevantEbayListing(title: string, context: EbaySearchContext) {
+  const normalizedTitle = normalizeSearchText(title);
+  const normalizedCompactTitle = normalizeCompactText(title);
+  if (!normalizedTitle) {
+    return false;
+  }
+
+  const excludedTerms = [
+    'booster',
+    'box',
+    'pack',
+    'bundle',
+    'binder',
+    'lot',
+    'proxy',
+    'custom',
+    'digital',
+    'code card',
+    'tin',
+    'case',
+    'empty',
+    'damaged',
+    'psa',
+    'bgs',
+    'cgc',
+    'slab',
+    'graded',
+  ];
+
+  if (excludedTerms.some((term) => normalizedTitle.includes(term))) {
+    return false;
+  }
+
+  const nameTokens = tokenizeSearchText(context.cardName).filter((token) => token.length > 2);
+  if (!nameTokens.every((token) => normalizedTitle.includes(token))) {
+    return false;
+  }
+
+  const setTokens = tokenizeSearchText(context.setName ?? '').filter((token) => token.length > 2);
+  const hasSetMatch = !setTokens.length || setTokens.some((token) => normalizedTitle.includes(token));
+  if (!hasSetMatch) {
+    return false;
+  }
+
+  if (context.localId) {
+    const localId = normalizeCardNumber(context.localId);
+    if (localId && !normalizedCompactTitle.includes(localId)) {
+      return false;
+    }
+  }
+
+  return normalizedTitle.includes('pokemon');
+}
+
+function normalizeSearchText(value: string) {
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9\s-]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function tokenizeSearchText(value: string) {
+  return normalizeSearchText(value).split(' ').filter(Boolean);
+}
+
+function normalizeCardNumber(value: string) {
+  const normalized = normalizeCompactText(value);
+  return normalized || null;
+}
+
+function normalizeCompactText(value: string) {
+  return value.toLowerCase().replace(/[^a-z0-9]/g, '');
+}
+
+function calculateFairValue({
+  tcgplayerPrice,
+  cardmarketPrice,
+  ebayMedianPrice,
+}: {
+  tcgplayerPrice: number | null;
+  cardmarketPrice: number | null;
+  ebayMedianPrice: number | null;
+}) {
+  const weightedSources = [
+    tcgplayerPrice != null ? { value: tcgplayerPrice, weight: 0.55 } : null,
+    ebayMedianPrice != null ? { value: ebayMedianPrice, weight: 0.35 } : null,
+    cardmarketPrice != null ? { value: cardmarketPrice, weight: 0.1 } : null,
+  ].filter(
+    (source): source is { value: number; weight: number } =>
+      Boolean(source && Number.isFinite(source.value)),
+  );
+
+  if (!weightedSources.length) {
+    return null;
+  }
+
+  const weightedSum = weightedSources.reduce(
+    (sum, source) => sum + source.value * source.weight,
+    0,
+  );
+  const totalWeight = weightedSources.reduce((sum, source) => sum + source.weight, 0);
+  const baseConsensus = weightedSum / totalWeight;
+  const sortedValues = weightedSources
+    .map((source) => source.value)
+    .sort((left, right) => left - right);
+  const medianValue = sortedValues[Math.floor(sortedValues.length / 2)];
+  const dampedConsensus =
+    sortedValues.length >= 2 ? (baseConsensus + medianValue) / 2 : baseConsensus;
+
+  return Number(dampedConsensus.toFixed(2));
+}
+
+function hasEbayCredentials() {
+  return Boolean(EBAY_CLIENT_ID && EBAY_CLIENT_SECRET);
+}
+
+function getEbayIdentityBaseUrl() {
+  return EBAY_ENV === 'sandbox' ? 'https://api.sandbox.ebay.com' : 'https://api.ebay.com';
+}
+
+function getEbayApiBaseUrl() {
+  return EBAY_ENV === 'sandbox' ? 'https://api.sandbox.ebay.com' : 'https://api.ebay.com';
+}
+
+async function getEbayApplicationToken() {
+  if (!hasEbayCredentials()) {
+    return null;
+  }
+
+  if (ebayAppTokenCache && ebayAppTokenCache.expiresAt > Date.now() + 60_000) {
+    return ebayAppTokenCache.accessToken;
+  }
+
+  const basicAuth = Buffer.from(`${EBAY_CLIENT_ID}:${EBAY_CLIENT_SECRET}`).toString('base64');
+  const body = new URLSearchParams({
+    grant_type: 'client_credentials',
+    scope: 'https://api.ebay.com/oauth/api_scope',
+  });
+
+  const response = await fetch(`${getEbayIdentityBaseUrl()}/identity/v1/oauth2/token`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Basic ${basicAuth}`,
+      'Content-Type': 'application/x-www-form-urlencoded',
+    },
+    body: body.toString(),
+  });
+
+  if (!response.ok) {
+    console.log('[eBay] token HTTP error', response.status);
+    return null;
+  }
+
+  const payload = (await response.json()) as {
+    access_token?: string;
+    expires_in?: number;
+  };
+
+  if (!payload.access_token || !payload.expires_in) {
+    console.log('[eBay] token response missing access token');
+    return null;
+  }
+
+  ebayAppTokenCache = {
+    accessToken: payload.access_token,
+    expiresAt: Date.now() + payload.expires_in * 1000,
+  };
+
+  return ebayAppTokenCache.accessToken;
 }

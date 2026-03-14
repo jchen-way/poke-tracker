@@ -26,7 +26,6 @@ interface PricePoint {
 
 interface PriceChartProps {
   data?: PricePoint[];
-  range?: string;
 }
 
 function formatTooltipValue(value: TooltipValueType | undefined) {
@@ -119,18 +118,14 @@ const CustomTooltip = ({
   return null;
 };
 
-export default function PriceChart({ data, range }: PriceChartProps) {
+export default function PriceChart({ data }: PriceChartProps) {
   const safeData = data ?? [];
 
   if (safeData.length === 0) {
     return (
       <div className="chart-empty-state">
-        <strong>{range === '1D' ? 'No intraday data yet' : 'No price data yet'}</strong>
-        <span>
-          {range === '1D'
-            ? 'The 1D view needs multiple snapshots from the same day. Daily ingests alone will not populate this view.'
-            : 'Run ingestion a few times over time to build a usable chart.'}
-        </span>
+        <strong>No price data yet</strong>
+        <span>Run ingestion a few times over time to build a usable chart.</span>
       </div>
     );
   }
@@ -138,12 +133,8 @@ export default function PriceChart({ data, range }: PriceChartProps) {
   if (safeData.length === 1) {
     return (
       <div className="chart-empty-state">
-        <strong>{range === '1D' ? 'Only one intraday snapshot available' : 'Only one snapshot available'}</strong>
-        <span>
-          {range === '1D'
-            ? 'The 1D view needs multiple snapshots from the same day. Without intraday ingestion, this range will stay sparse.'
-            : 'Historical trend lines need at least two points. Ingest again later to build history.'}
-        </span>
+        <strong>Only one snapshot available</strong>
+        <span>Historical trend lines need at least two points. Ingest again later to build history.</span>
       </div>
     );
   }

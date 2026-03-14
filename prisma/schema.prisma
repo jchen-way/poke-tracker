@@ -8,12 +8,13 @@ datasource db {
 }
 
 model User {
-  id        String      @id @default(uuid())
-  email     String      @unique
+  id        String          @id @default(uuid())
+  email     String          @unique
   password  String
-  createdAt DateTime    @default(now())
-  updatedAt DateTime    @updatedAt
+  createdAt DateTime        @default(now())
+  updatedAt DateTime        @updatedAt
   alerts    AlertRule[]
+  watchlist WatchlistItem[]
 }
 
 model TrackedItem {
@@ -24,13 +25,14 @@ model TrackedItem {
   number           String?
   type             String              @default("CARD")
   imageUrl         String?
-  priorityScore    Float               @default(0)
-  lastPriceCheckAt DateTime?
   createdAt        DateTime            @default(now())
   updatedAt        DateTime            @updatedAt
+  lastPriceCheckAt DateTime?
+  priorityScore    Float               @default(0)
   alerts           AlertRule[]
   prices           PriceSnapshot[]
   analysis         TechnicalAnalysis[]
+  watchlistEntries WatchlistItem[]
 }
 
 model PriceSnapshot {
@@ -42,6 +44,8 @@ model PriceSnapshot {
   ebayPrice      Float?
   volume         Int?
   createdAt      DateTime    @default(now())
+  ebayLowPrice   Float?
+  isSynthetic    Boolean     @default(false)
   item           TrackedItem @relation(fields: [trackedItemId], references: [id], onDelete: Cascade)
 
   @@index([trackedItemId, date])
@@ -74,4 +78,16 @@ model AlertRule {
   createdAt     DateTime    @default(now())
   item          TrackedItem @relation(fields: [trackedItemId], references: [id], onDelete: Cascade)
   user          User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model WatchlistItem {
+  id            String      @id @default(uuid())
+  userId        String
+  trackedItemId String
+  createdAt     DateTime    @default(now())
+  item          TrackedItem @relation(fields: [trackedItemId], references: [id], onDelete: Cascade)
+  user          User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, trackedItemId])
+  @@index([trackedItemId, createdAt])
 }

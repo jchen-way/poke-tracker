@@ -11,8 +11,11 @@ Create `tracker_app/.env` from `tracker_app/.env.example` and set:
 - `CRON_SECRET`: a long random string used to authorize scheduled ingestion requests
 - `EBAY_ACCOUNT_DELETION_ENDPOINT`: your deployed eBay notification callback URL
 - `EBAY_VERIFICATION_TOKEN`: the token you enter in the eBay developer console
+- `EBAY_CLIENT_ID`: your eBay production App ID / Client ID
+- `EBAY_CLIENT_SECRET`: your eBay production Cert ID / Client Secret
+- `EBAY_ENV`: usually `production`
+- `EBAY_MARKETPLACE_ID`: usually `EBAY_US`
 - `TCGDEX_LANGUAGE`: API language, usually `en`
-- `EBAY_OAUTH_TOKEN`: optional, only if you want extra eBay pricing enrichment
 
 ## Database Setup
 
@@ -76,7 +79,7 @@ Set these repository secrets before enabling it:
 
 The workflow runs:
 
-- every 6 hours for price refresh batches
+- every 3 hours for price refresh batches
 - every Sunday at 3:00 UTC for a larger catalog discovery batch
 
 ## eBay Account Deletion Callback
@@ -102,7 +105,20 @@ The sync will:
 - load detailed pricing for each tracked card
 - upsert tracked items into Postgres
 - write price snapshots using free TCGplayer and Cardmarket data embedded in TCGdex
-- optionally enrich a limited subset with eBay pricing if `EBAY_OAUTH_TOKEN` is set
+- optionally enrich the current refresh batch with eBay pricing if `EBAY_CLIENT_ID` and `EBAY_CLIENT_SECRET` are set
+
+eBay pricing is split intentionally:
+
+- `ebayPrice`: median active listing price used as a market-level comparison input for consensus fair value
+- `ebayLowPrice`: lowest matched active listing used for buy-opportunity detection
+
+The eBay matcher is stricter than a raw keyword search. It filters out noisy listings such as lots, booster products, graded slabs, and proxy/custom items, and it requires title alignment with the card name plus set/number when available.
+
+TCGdex note:
+
+- TCGdex does not publish a clear hard request-per-minute limit in the official docs/site referenced by this app
+- the ingestion defaults here stay conservative on request fan-out (`TCGDEX_PAGE_SIZE=50`, `TCGDEX_DETAIL_BATCH_SIZE=10`)
+- the scheduler is increased to every 3 hours, but the per-run batch size remains moderate instead of guessing an undocumented ceiling
 
 ## CSV Export Utility
 

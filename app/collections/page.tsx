@@ -4,6 +4,7 @@ import './page.css';
 import { requireUser } from '../../lib/auth';
 import prisma from '../../lib/prisma';
 import { normalizeCardImageUrl } from '../../lib/cardImages';
+import { addToWatchlistAction, removeFromWatchlistAction } from '../watchlist/actions';
 
 export const dynamic = 'force-dynamic';
 
@@ -31,7 +32,7 @@ export default async function CollectionsPage({
 }: {
   searchParams: Promise<SearchParams>;
 }) {
-  await requireUser();
+  const user = await requireUser();
   const resolvedSearchParams = await searchParams;
   const query = resolvedSearchParams.q?.trim() ?? '';
   const selectedSet = resolvedSearchParams.set?.trim() ?? '';
@@ -39,15 +40,23 @@ export default async function CollectionsPage({
   const maxPrice = parseNumber(resolvedSearchParams.maxPrice);
   const sort = resolvedSearchParams.sort ?? 'updated';
 
-  const trackedItems = await prisma.trackedItem.findMany({
-    include: {
-      prices: {
-        orderBy: { date: 'desc' },
-        take: 1,
+  const [trackedItems, watchlistItems] = await Promise.all([
+    prisma.trackedItem.findMany({
+      include: {
+        prices: {
+          orderBy: { date: 'desc' },
+          take: 1,
+        },
       },
-    },
-    orderBy: { updatedAt: 'desc' },
-  });
+      orderBy: { updatedAt: 'desc' },
+    }),
+    prisma.watchlistItem.findMany({
+      where: { userId: user.id },
+      select: { trackedItemId: true },
+    }),
+  ]);
+
+  const watchlistIds = new Set(watchlistItems.map((entry) => entry.trackedItemId));
 
   const allItems: CollectionItem[] = trackedItems.map((item) => {
     const latest = item.prices[0];
@@ -180,29 +189,31 @@ export default async function CollectionsPage({
       <section className="collections-grid">
         {filteredItems.length ? (
           filteredItems.map((item) => (
-            <Link
-              key={item.id}
-              href={`/dashboard?cardId=${encodeURIComponent(item.cardId ?? '')}&range=1M`}
-              className="collection-card retro-panel"
-            >
+            <div key={item.id} className="collection-card retro-panel">
               <div className="collection-art">
-                {normalizeCardImageUrl(item.imageUrl) ? (
-                  <>
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img src={normalizeCardImageUrl(item.imageUrl) ?? ''} alt={item.name} />
-                    <div className="collection-art-preview" aria-hidden="true">
+                <Link href={`/dashboard?cardId=${encodeURIComponent(item.cardId ?? '')}&range=1M`} className="collection-art-link">
+                  {normalizeCardImageUrl(item.imageUrl) ? (
+                    <>
                       {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img src={normalizeCardImageUrl(item.imageUrl) ?? ''} alt="" />
-                    </div>
-                  </>
-                ) : (
-                  <div className="collection-art-placeholder">{item.name.slice(0, 1)}</div>
-                )}
+                      <img src={normalizeCardImageUrl(item.imageUrl) ?? ''} alt={item.name} />
+                      <div className="collection-art-preview" aria-hidden="true">
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img src={normalizeCardImageUrl(item.imageUrl) ?? ''} alt="" />
+                      </div>
+                    </>
+                  ) : (
+                    <div className="collection-art-placeholder">{item.name.slice(0, 1)}</div>
+                  )}
+                </Link>
               </div>
               <div className="collection-card-body">
                 <div className="collection-card-top">
                   <div>
-                    <h3>{item.name}</h3>
+                    <h3>
+                      <Link href={`/dashboard?cardId=${encodeURIComponent(item.cardId ?? '')}&range=1M`} className="collection-title-link">
+                        {item.name}
+                      </Link>
+                    </h3>
                     <p className="text-muted">
                       {item.setName}
                       {item.number ? ` #${item.number}` : ''}
@@ -219,8 +230,33 @@ export default async function CollectionsPage({
                     {item.latestDate ? `Updated ${formatDate(item.latestDate)}` : 'No snapshot yet'}
                   </span>
                 </div>
+                <div className="collection-actions">
+                  <Link
+                    href={`/dashboard?cardId=${encodeURIComponent(item.cardId ?? '')}&range=1M`}
+                    className="btn-retro btn-inline"
+                  >
+                    View Chart
+                  </Link>
+                  {watchlistIds.has(item.id) ? (
+                    <form action={removeFromWatchlistAction}>
+                      <input type="hidden" name="trackedItemId" value={item.id} />
+                      <input type="hidden" name="redirectTo" value={buildCollectionsRedirect(resolvedSearchParams)} />
+                      <button type="submit" className="btn-retro clear btn-inline">
+                        Remove from Watchlist
+                      </button>
+                    </form>
+                  ) : (
+                    <form action={addToWatchlistAction}>
+                      <input type="hidden" name="trackedItemId" value={item.id} />
+                      <input type="hidden" name="redirectTo" value={buildCollectionsRedirect(resolvedSearchParams)} />
+                      <button type="submit" className="btn-retro blue btn-inline">
+                        Add to Watchlist
+                      </button>
+                    </form>
+                  )}
+                </div>
               </div>
-            </Link>
+            </div>
           ))
         ) : (
           <div className="retro-panel collections-empty">
@@ -231,6 +267,17 @@ export default async function CollectionsPage({
       </section>
     </div>
   );
+}
+
+function buildCollectionsRedirect(searchParams: SearchParams) {
+  const url = new URLSearchParams();
+  if (searchParams.q) url.set('q', searchParams.q);
+  if (searchParams.set) url.set('set', searchParams.set);
+  if (searchParams.minPrice) url.set('minPrice', searchParams.minPrice);
+  if (searchParams.maxPrice) url.set('maxPrice', searchParams.maxPrice);
+  if (searchParams.sort) url.set('sort', searchParams.sort);
+  const query = url.toString();
+  return query ? `/collections?${query}` : '/collections';
 }
 
 function parseNumber(value: string | undefined) {

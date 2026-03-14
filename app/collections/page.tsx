@@ -14,7 +14,10 @@ type SearchParams = {
   minPrice?: string;
   maxPrice?: string;
   sort?: string;
+  page?: string;
 };
+
+const PAGE_SIZE = 99;
 
 type CollectionItem = {
   id: string;
@@ -39,6 +42,7 @@ export default async function CollectionsPage({
   const minPrice = parseNumber(resolvedSearchParams.minPrice);
   const maxPrice = parseNumber(resolvedSearchParams.maxPrice);
   const sort = resolvedSearchParams.sort ?? 'updated';
+  const currentPage = parsePage(resolvedSearchParams.page);
 
   const [trackedItems, watchlistItems] = await Promise.all([
     prisma.trackedItem.findMany({
@@ -109,6 +113,11 @@ export default async function CollectionsPage({
     pricedItems.length > 0
       ? pricedItems.reduce((sum, item) => sum + (item.latestPrice ?? 0), 0) / pricedItems.length
       : null;
+  const totalPages = Math.max(1, Math.ceil(filteredItems.length / PAGE_SIZE));
+  const safePage = Math.min(currentPage, totalPages);
+  const pageStart = (safePage - 1) * PAGE_SIZE;
+  const paginatedItems = filteredItems.slice(pageStart, pageStart + PAGE_SIZE);
+  const pageEnd = filteredItems.length === 0 ? 0 : pageStart + paginatedItems.length;
 
   return (
     <div className="dashboard fade-in collections-page">
@@ -187,8 +196,8 @@ export default async function CollectionsPage({
       </section>
 
       <section className="collections-grid">
-        {filteredItems.length ? (
-          filteredItems.map((item) => (
+        {paginatedItems.length ? (
+          paginatedItems.map((item) => (
             <div key={item.id} className="collection-card retro-panel">
               <div className="collection-art">
                 <Link href={`/dashboard?cardId=${encodeURIComponent(item.cardId ?? '')}&range=1M`} className="collection-art-link">
@@ -265,6 +274,35 @@ export default async function CollectionsPage({
           </div>
         )}
       </section>
+
+      {filteredItems.length ? (
+        <section className="collections-pagination retro-panel">
+          <div className="pagination-summary text-muted">
+            Showing {pageStart + 1}-{pageEnd} of {filteredItems.length} cards
+          </div>
+          <div className="pagination-controls">
+            <Link
+              href={buildCollectionsPageHref(resolvedSearchParams, safePage - 1)}
+              className={`btn-retro clear pagination-btn ${safePage <= 1 ? 'disabled' : ''}`}
+              aria-disabled={safePage <= 1}
+              tabIndex={safePage <= 1 ? -1 : undefined}
+            >
+              Previous
+            </Link>
+            <span className="pagination-page">
+              Page {safePage} of {totalPages}
+            </span>
+            <Link
+              href={buildCollectionsPageHref(resolvedSearchParams, safePage + 1)}
+              className={`btn-retro clear pagination-btn ${safePage >= totalPages ? 'disabled' : ''}`}
+              aria-disabled={safePage >= totalPages}
+              tabIndex={safePage >= totalPages ? -1 : undefined}
+            >
+              Next
+            </Link>
+          </div>
+        </section>
+      ) : null}
     </div>
   );
 }
@@ -276,6 +314,19 @@ function buildCollectionsRedirect(searchParams: SearchParams) {
   if (searchParams.minPrice) url.set('minPrice', searchParams.minPrice);
   if (searchParams.maxPrice) url.set('maxPrice', searchParams.maxPrice);
   if (searchParams.sort) url.set('sort', searchParams.sort);
+  if (searchParams.page && searchParams.page !== '1') url.set('page', searchParams.page);
+  const query = url.toString();
+  return query ? `/collections?${query}` : '/collections';
+}
+
+function buildCollectionsPageHref(searchParams: SearchParams, page: number) {
+  const url = new URLSearchParams();
+  if (searchParams.q) url.set('q', searchParams.q);
+  if (searchParams.set) url.set('set', searchParams.set);
+  if (searchParams.minPrice) url.set('minPrice', searchParams.minPrice);
+  if (searchParams.maxPrice) url.set('maxPrice', searchParams.maxPrice);
+  if (searchParams.sort) url.set('sort', searchParams.sort);
+  if (page > 1) url.set('page', String(page));
   const query = url.toString();
   return query ? `/collections?${query}` : '/collections';
 }
@@ -284,6 +335,15 @@ function parseNumber(value: string | undefined) {
   if (!value) return null;
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : null;
+}
+
+function parsePage(value: string | undefined) {
+  if (!value) return 1;
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed < 1) {
+    return 1;
+  }
+  return parsed;
 }
 
 function sortItems(left: CollectionItem, right: CollectionItem, sort: string) {

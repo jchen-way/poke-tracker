@@ -1,5 +1,6 @@
 import prisma from './prisma';
 import { normalizeCardImageUrl } from './cardImages';
+import { buildEbaySearchQuery } from './ebaySearch';
 
 const TCGDEX_LANGUAGE = process.env.TCGDEX_LANGUAGE ?? 'en';
 const TCGDEX_API_URL =
@@ -64,6 +65,7 @@ type EbayMarketSnapshot = {
   lowPrice: number | null;
   medianPrice: number | null;
   sampleSize: number;
+  lowListingUrl: string | null;
 };
 
 type EbaySearchContext = {
@@ -148,7 +150,11 @@ export async function syncPokemonMarketData(options: SyncOptions = {}) {
     const ebayMarket =
       hasEbayCredentials() && index < EBAY_ENRICHMENT_LIMIT
         ? await fetchEbayMarketSnapshot({
-            query: buildEbaySearchQuery(card),
+            query: buildEbaySearchQuery({
+              name: card.name,
+              setName: card.set?.name ?? null,
+              localId: card.localId ?? null,
+            }),
             context: {
               cardName: card.name,
               setName: card.set?.name ?? null,
@@ -158,6 +164,7 @@ export async function syncPokemonMarketData(options: SyncOptions = {}) {
         : null;
     const ebayPrice = ebayMarket?.medianPrice ?? null;
     const ebayLowPrice = ebayMarket?.lowPrice ?? null;
+    const ebayLowListingUrl = ebayMarket?.lowListingUrl ?? null;
     const fairValue = calculateFairValue({
       tcgplayerPrice,
       cardmarketPrice,
@@ -181,6 +188,7 @@ export async function syncPokemonMarketData(options: SyncOptions = {}) {
         tcgplayerPrice,
         ebayPrice,
         ebayLowPrice,
+        ebaySampleSize: ebayMarket?.sampleSize ?? null,
         historyDays,
         historyPoints,
       });
@@ -192,6 +200,8 @@ export async function syncPokemonMarketData(options: SyncOptions = {}) {
       tcgplayerPrice,
       ebayPrice,
       ebayLowPrice,
+      ebaySampleSize: ebayMarket?.sampleSize ?? null,
+      ebayLowListingUrl,
       isSynthetic: false,
       date: new Date(),
     });
@@ -239,7 +249,7 @@ export async function getPriceSeriesForCard(cardId: string) {
   if (!snapshots.length) return [];
 
   const closes = snapshots.map((snap) => {
-    const base = snap.fairValue ?? snap.tcgplayerPrice ?? snap.ebayPrice ?? 0;
+    const base = chooseChartPrice(snap);
     return base;
   });
 
@@ -275,6 +285,8 @@ async function createSnapshot({
   tcgplayerPrice,
   ebayPrice,
   ebayLowPrice,
+  ebaySampleSize,
+  ebayLowListingUrl,
   isSynthetic,
   date,
 }: {
@@ -283,6 +295,8 @@ async function createSnapshot({
   tcgplayerPrice: number | null;
   ebayPrice: number | null;
   ebayLowPrice: number | null;
+  ebaySampleSize: number | null;
+  ebayLowListingUrl: string | null;
   isSynthetic: boolean;
   date: Date;
 }) {
@@ -293,6 +307,8 @@ async function createSnapshot({
       tcgplayerPrice,
       ebayPrice,
       ebayLowPrice,
+      ebaySampleSize,
+      ebayLowListingUrl,
       isSynthetic,
       volume: null,
       date,
@@ -309,6 +325,7 @@ async function seedHistoricalSnapshots({
   tcgplayerPrice,
   ebayPrice,
   ebayLowPrice,
+  ebaySampleSize,
   historyDays,
   historyPoints,
 }: {
@@ -317,6 +334,7 @@ async function seedHistoricalSnapshots({
   tcgplayerPrice: number | null;
   ebayPrice: number | null;
   ebayLowPrice: number | null;
+  ebaySampleSize: number | null;
   historyDays: number;
   historyPoints: number;
 }) {
@@ -337,6 +355,8 @@ async function seedHistoricalSnapshots({
       ebayPrice: ebayPrice != null ? applySyntheticDrift(ebayPrice, progress * 0.85) : null,
       ebayLowPrice:
         ebayLowPrice != null ? applySyntheticDrift(ebayLowPrice, progress * 0.8) : null,
+      ebaySampleSize,
+      ebayLowListingUrl: null,
       isSynthetic: true,
       date: syntheticDate,
     });
@@ -456,13 +476,29 @@ function extractTcgplayerPrice(card: TcgdexCard): number | null {
     isTcgplayerVariant,
   );
 
-  return firstFiniteNumber(
-    entries.flatMap((entry) => [
-      entry.marketPrice,
-      entry.midPrice,
-      entry.lowPrice,
-    ]),
-  );
+  const variantAnchors = entries
+    .map((entry) =>
+      firstFiniteNumber([
+        entry.lowPrice,
+        entry.directLowPrice,
+        entry.marketPrice,
+        entry.midPrice,
+      ]),
+    )
+    .filter((value): value is number => typeof value === 'number' && Number.isFinite(value))
+    .sort((left, right) => left - right);
+
+  if (!variantAnchors.length) {
+    return null;
+  }
+
+  const middle = Math.floor(variantAnchors.length / 2);
+  const median =
+    variantAnchors.length % 2 === 0
+      ? (variantAnchors[middle - 1] + variantAnchors[middle]) / 2
+      : variantAnchors[middle];
+
+  return Number(median.toFixed(2));
 }
 
 function extractCardmarketPrice(card: TcgdexCard): number | null {
@@ -492,12 +528,6 @@ function isTcgplayerVariant(value: unknown): value is TcgdexTcgplayerVariant {
 
 function asNumber(value: unknown): number | null {
   return typeof value === 'number' && Number.isFinite(value) ? value : null;
-}
-
-function buildEbaySearchQuery(card: TcgdexCard): string {
-  return [card.name, card.set?.name, card.localId, 'pokemon card']
-    .filter(Boolean)
-    .join(' ');
 }
 
 function createTcgdexUrl(resourceParts: string[]): URL;
@@ -574,6 +604,7 @@ async function fetchEbayMarketSnapshot({
     const json: {
       itemSummaries?: Array<{
         title?: string;
+        itemWebUrl?: string;
         price?: { value?: string };
         shippingOptions?: Array<{ shippingCost?: { value?: string } }>;
       }>;
@@ -584,28 +615,34 @@ async function fetchEbayMarketSnapshot({
     );
     if (!items.length) return null;
 
-    const prices = items
+    const pricedItems = items
       .map((item) => {
         const itemPrice = Number(item.price?.value);
         const shipping = Number(item.shippingOptions?.[0]?.shippingCost?.value ?? 0);
         const total = itemPrice + shipping;
-        return Number.isFinite(total) ? total : Number.NaN;
+        return Number.isFinite(total)
+          ? {
+              total: Number(total.toFixed(2)),
+              itemWebUrl: item.itemWebUrl ?? null,
+            }
+          : null;
       })
-      .filter((value) => Number.isFinite(value));
+      .filter((value): value is { total: number; itemWebUrl: string | null } => Boolean(value));
 
-    if (!prices.length) return null;
+    if (!pricedItems.length) return null;
 
-    const sorted = [...prices].sort((left, right) => left - right);
+    const sorted = [...pricedItems].sort((left, right) => left.total - right.total);
     const middle = Math.floor(sorted.length / 2);
     const medianPrice =
       sorted.length % 2 === 0
-        ? (sorted[middle - 1] + sorted[middle]) / 2
-        : sorted[middle];
+        ? (sorted[middle - 1].total + sorted[middle].total) / 2
+        : sorted[middle].total;
 
     return {
-      lowPrice: Number(sorted[0].toFixed(2)),
+      lowPrice: Number(sorted[0].total.toFixed(2)),
       medianPrice: Number(medianPrice.toFixed(2)),
       sampleSize: sorted.length,
+      lowListingUrl: sorted[0].itemWebUrl,
     };
   } catch (err) {
     console.log('[eBay] fetch error', err);
@@ -640,26 +677,40 @@ function isRelevantEbayListing(title: string, context: EbaySearchContext) {
     'cgc',
     'slab',
     'graded',
+    'reprint',
+    'celebrations',
+    'world championship',
+    'gold metal',
+    'jumbo',
+    'oversize',
   ];
 
   if (excludedTerms.some((term) => normalizedTitle.includes(term))) {
     return false;
   }
 
+  const normalizedName = normalizeSearchText(context.cardName);
+  const normalizedCompactName = normalizeCompactText(context.cardName);
   const nameTokens = tokenizeSearchText(context.cardName).filter((token) => token.length > 2);
-  if (!nameTokens.every((token) => normalizedTitle.includes(token))) {
+  if (
+    !(normalizedTitle.includes(normalizedName) || normalizedCompactTitle.includes(normalizedCompactName)) &&
+    !nameTokens.every((token) => normalizedTitle.includes(token))
+  ) {
     return false;
   }
 
-  const setTokens = tokenizeSearchText(context.setName ?? '').filter((token) => token.length > 2);
-  const hasSetMatch = !setTokens.length || setTokens.some((token) => normalizedTitle.includes(token));
+  const setTokens = tokenizeSearchText(context.setName ?? '')
+    .filter((token) => token.length > 2)
+    .filter((token) => !['base', 'set'].includes(token));
+  const hasSetMatch =
+    !setTokens.length || setTokens.every((token) => normalizedTitle.includes(token));
   if (!hasSetMatch) {
     return false;
   }
 
   if (context.localId) {
     const localId = normalizeCardNumber(context.localId);
-    if (localId && !normalizedCompactTitle.includes(localId)) {
+    if (localId && !hasCardNumberMatch(title, localId)) {
       return false;
     }
   }
@@ -684,6 +735,24 @@ function normalizeCardNumber(value: string) {
   return normalized || null;
 }
 
+function hasCardNumberMatch(rawTitle: string, normalizedLocalId: string) {
+  const lowerTitle = rawTitle.toLowerCase();
+  const compactTitle = normalizeCompactText(rawTitle);
+
+  if (normalizedLocalId.length <= 2 && /^\d+$/.test(normalizedLocalId)) {
+    const numericId = Number.parseInt(normalizedLocalId, 10);
+    const patterns = [
+      new RegExp(`#\\s*0*${numericId}(?!\\d)`),
+      new RegExp(`\\b0*${numericId}\\s*/`),
+      new RegExp(`/\\s*0*${numericId}\\b`),
+      new RegExp(`\\b0*${numericId}\\b`),
+    ];
+    return patterns.some((pattern) => pattern.test(lowerTitle));
+  }
+
+  return compactTitle.includes(normalizedLocalId);
+}
+
 function normalizeCompactText(value: string) {
   return value.toLowerCase().replace(/[^a-z0-9]/g, '');
 }
@@ -698,9 +767,9 @@ function calculateFairValue({
   ebayMedianPrice: number | null;
 }) {
   const weightedSources = [
-    tcgplayerPrice != null ? { value: tcgplayerPrice, weight: 0.55 } : null,
-    ebayMedianPrice != null ? { value: ebayMedianPrice, weight: 0.35 } : null,
-    cardmarketPrice != null ? { value: cardmarketPrice, weight: 0.1 } : null,
+    tcgplayerPrice != null ? { value: tcgplayerPrice, weight: 0.7 } : null,
+    ebayMedianPrice != null ? { value: ebayMedianPrice * 0.9, weight: 0.05 } : null,
+    cardmarketPrice != null ? { value: cardmarketPrice, weight: 0.25 } : null,
   ].filter(
     (source): source is { value: number; weight: number } =>
       Boolean(source && Number.isFinite(source.value)),
@@ -724,6 +793,21 @@ function calculateFairValue({
     sortedValues.length >= 2 ? (baseConsensus + medianValue) / 2 : baseConsensus;
 
   return Number(dampedConsensus.toFixed(2));
+}
+
+function chooseChartPrice(snapshot: {
+  fairValue: number | null;
+  tcgplayerPrice: number | null;
+  ebayPrice: number | null;
+  ebayLowPrice: number | null;
+}) {
+  return (
+    snapshot.tcgplayerPrice ??
+    snapshot.fairValue ??
+    snapshot.ebayPrice ??
+    snapshot.ebayLowPrice ??
+    0
+  );
 }
 
 function hasEbayCredentials() {

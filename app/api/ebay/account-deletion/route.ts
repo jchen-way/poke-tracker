@@ -43,9 +43,7 @@ export async function GET(request: Request) {
 
 export async function POST(request: Request) {
   try {
-    const payload = await request.json().catch(() => null);
-
-    console.log('[eBay] account deletion notification received', payload);
+    await request.json().catch(() => null);
 
     return NextResponse.json({ received: true }, { status: 200 });
   } catch (error: unknown) {

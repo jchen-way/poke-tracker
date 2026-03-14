@@ -72,6 +72,11 @@
   min-width: 0;
 }
 
+.metric-link {
+  color: inherit;
+  text-decoration: none;
+}
+
 .metric-card:hover {
   border-color: rgba(255, 255, 255, 0.2);
   box-shadow: 0 10px 40px -10px rgba(0,0,0,0.5);
@@ -371,6 +376,8 @@
   align-items: center;
   border-bottom: 1px solid var(--color-border);
   transition: background var(--transition-fast);
+  color: inherit;
+  text-decoration: none;
 }
 
 .alert-item:hover {
@@ -379,10 +386,6 @@
 
 .alert-item:last-child {
   border-bottom: none;
-}
-
-.alert-item.new {
-  background: radial-gradient(circle at left, rgba(74, 222, 128, 0.05) 0%, transparent 100%);
 }
 
 .alert-indicator {
@@ -428,6 +431,102 @@
 
 .collections-panel {
   padding: 0;
+}
+
+.details-page {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+.details-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.details-header p {
+  color: var(--color-text-muted);
+  max-width: 60ch;
+}
+
+.details-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.detail-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 1rem;
+  padding: 1.25rem 1.5rem;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.detail-item:last-child {
+  border-bottom: none;
+}
+
+.detail-main {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.detail-label {
+  font-size: 0.78rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  font-weight: 700;
+}
+
+.detail-label.buy {
+  color: var(--color-trend-up);
+}
+
+.detail-label.arbitrage,
+.detail-label.discrepancy {
+  color: var(--color-accent-gold);
+}
+
+.detail-title {
+  font-size: 1.15rem;
+  font-weight: 700;
+}
+
+.detail-reason {
+  color: var(--color-text-muted);
+}
+
+.detail-meta {
+  display: flex;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+}
+
+.detail-value {
+  font-size: 1.25rem;
+  font-weight: 700;
+  text-align: right;
+}
+
+.detail-actions {
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+@media (max-width: 900px) {
+  .detail-item {
+    grid-template-columns: 1fr;
+  }
+
+  .detail-value {
+    text-align: left;
+  }
 }
 
 .collections-list {

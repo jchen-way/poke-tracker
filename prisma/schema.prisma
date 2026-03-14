@@ -42,9 +42,11 @@ model PriceSnapshot {
   fairValue      Float?
   tcgplayerPrice Float?
   ebayPrice      Float?
+  ebaySampleSize Int?
   volume         Int?
   createdAt      DateTime    @default(now())
   ebayLowPrice   Float?
+  ebayLowListingUrl String?
   isSynthetic    Boolean     @default(false)
   item           TrackedItem @relation(fields: [trackedItemId], references: [id], onDelete: Cascade)
 

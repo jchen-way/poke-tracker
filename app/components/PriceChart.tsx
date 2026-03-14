@@ -179,7 +179,7 @@ export default function PriceChart({ data }: PriceChartProps) {
           <Line
             type="monotone"
             dataKey="price"
-            name="Fair Price"
+            name="Price"
             stroke="var(--color-border-dark)"
             strokeWidth={3}
             dot={{ r: 4, fill: '#fff', stroke: 'var(--color-border-dark)', strokeWidth: 2 }}

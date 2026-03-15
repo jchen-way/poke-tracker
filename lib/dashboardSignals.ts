@@ -136,7 +136,7 @@ export function hasBuyOpportunity(snapshot: DashboardSnapshot) {
   const ebayMedian = snapshot.ebayPrice!;
 
   const spread = fairValue - ebayLow;
-  return spread >= 3 && fairValue > ebayLow * 1.15 && fairValue > ebayMedian * 1.05;
+  return spread >= 1 && fairValue > ebayLow * 1.05 && fairValue > ebayMedian * 1.01;
 }
 
 export function hasArbitrageSpread(snapshot: DashboardSnapshot) {

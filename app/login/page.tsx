@@ -40,8 +40,8 @@ export default async function Login({
         
         <form className="auth-form" action={loginAction}>
           <div className="form-group">
-            <label className="pixel-text" htmlFor="login-email">Trainer ID (Email)</label>
-            <input id="login-email" name="email" type="email" className="retro-input" placeholder="ash@pallet.town" required />
+            <label className="pixel-text" htmlFor="login-email">Email</label>
+            <input id="login-email" name="email" type="email" className="retro-input" placeholder="you@example.com" required />
           </div>
           
           <div className="form-group">
@@ -52,7 +52,7 @@ export default async function Login({
           {error ? <p className="auth-error">{error}</p> : null}
 
           <button type="submit" className="btn-retro blue auth-submit">
-            Login to PC
+            Sign In
           </button>
 
           <a href="/api/auth/google/start" className="btn-retro clear auth-submit auth-google">
@@ -60,7 +60,7 @@ export default async function Login({
           </a>
 
           <div className="auth-footer text-muted text-center">
-            Don&apos;t have an ID? <Link href="/register" className="auth-link">Register</Link>
+            Don&apos;t have an account? <Link href="/register" className="auth-link">Create one</Link>
           </div>
         </form>
       </div>

@@ -33,14 +33,14 @@ export default async function RegisterPage({
       <div className="auth-card retro-panel">
         <div className="auth-header text-center">
           <Gamepad2 size={48} color="var(--color-accent-secondary)" style={{ margin: '0 auto 1rem auto' }} />
-          <h1 className="pixel-text">Create Trainer ID</h1>
-          <p className="text-muted">Create an account to save alerts and collection decisions.</p>
+          <h1 className="pixel-text">Create Account</h1>
+          <p className="text-muted">Create an account to save your watchlist, alerts, and collection activity.</p>
         </div>
 
         <form className="auth-form" action={registerAction}>
           <div className="form-group">
-            <label className="pixel-text" htmlFor="register-email">Trainer ID (Email)</label>
-            <input id="register-email" name="email" type="email" className="retro-input" placeholder="ash@pallet.town" required />
+            <label className="pixel-text" htmlFor="register-email">Email</label>
+            <input id="register-email" name="email" type="email" className="retro-input" placeholder="you@example.com" required />
           </div>
 
           <div className="form-group">
@@ -60,11 +60,11 @@ export default async function RegisterPage({
           </button>
 
           <a href="/api/auth/google/start" className="btn-retro clear auth-submit auth-google">
-            Sign up with Google
+            Continue with Google
           </a>
 
           <div className="auth-footer text-muted text-center">
-            Already have an account? <Link href="/login" className="auth-link">Login</Link>
+            Already have an account? <Link href="/login" className="auth-link">Sign in</Link>
           </div>
         </form>
       </div>

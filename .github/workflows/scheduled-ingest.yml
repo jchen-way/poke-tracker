@@ -13,7 +13,9 @@ jobs:
     steps:
       - name: Trigger price refresh batch
         run: |
-          URL="${{ secrets.APP_URL%/ }}/api/cron/ingest?limit=100&source=github-actions&job=refresh-prices"
+          APP_URL="${{ secrets.APP_URL }}"
+          APP_URL="${APP_URL%/}"
+          URL="${APP_URL}/api/cron/ingest?limit=100&source=github-actions&job=refresh-prices"
           TMP_BODY="$(mktemp)"
           CURL_META="$(curl --location --show-error --silent --output "$TMP_BODY" --write-out "%{http_code} %{url_effective}" \
             -H "x-cron-secret: ${{ secrets.CRON_SECRET }}" \
@@ -50,7 +52,9 @@ jobs:
     steps:
       - name: Trigger catalog discovery batch
         run: |
-          URL="${{ secrets.APP_URL%/ }}/api/cron/ingest?limit=50&discoverLimit=500&source=github-actions&job=discover-catalog"
+          APP_URL="${{ secrets.APP_URL }}"
+          APP_URL="${APP_URL%/}"
+          URL="${APP_URL}/api/cron/ingest?limit=50&discoverLimit=500&source=github-actions&job=discover-catalog"
           TMP_BODY="$(mktemp)"
           CURL_META="$(curl --location --show-error --silent --output "$TMP_BODY" --write-out "%{http_code} %{url_effective}" \
             -H "x-cron-secret: ${{ secrets.CRON_SECRET }}" \

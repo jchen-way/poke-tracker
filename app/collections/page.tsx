@@ -46,6 +46,9 @@ export default async function CollectionsPage({
 
   const [trackedItems, watchlistItems] = await Promise.all([
     prisma.trackedItem.findMany({
+      where: {
+        type: 'CARD',
+      },
       include: {
         prices: {
           orderBy: { date: 'desc' },

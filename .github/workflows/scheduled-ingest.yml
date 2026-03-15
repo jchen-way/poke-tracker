@@ -13,9 +13,33 @@ jobs:
     steps:
       - name: Trigger price refresh batch
         run: |
-          curl --fail --show-error --silent \
+          URL="${{ secrets.APP_URL }}/api/cron/ingest?limit=100&source=github-actions&job=refresh-prices"
+          TMP_BODY="$(mktemp)"
+          HTTP_CODE="$(curl --show-error --silent --output "$TMP_BODY" --write-out "%{http_code}" \
             -H "x-cron-secret: ${{ secrets.CRON_SECRET }}" \
-            "${{ secrets.APP_URL }}/api/cron/ingest?limit=100"
+            "$URL")"
+
+          echo "HTTP $HTTP_CODE"
+          cat "$TMP_BODY"
+
+          if [ "$HTTP_CODE" -ne 200 ]; then
+            echo "Ingest request failed with HTTP $HTTP_CODE" >&2
+            exit 1
+          fi
+
+          node -e '
+            const fs = require("fs");
+            const path = process.argv[1];
+            const body = JSON.parse(fs.readFileSync(path, "utf8"));
+            if (!body.success) {
+              console.error("Ingest returned success=false", body);
+              process.exit(1);
+            }
+            const summary = body.summary ?? {};
+            const line = `cardsUpdated=${summary.cardsUpdated ?? 0}, etbsUpdated=${summary.etbsUpdated ?? 0}, count=${body.count ?? 0}, durationMs=${body.durationMs ?? 0}, requestId=${body.requestId ?? "n/a"}`;
+            console.log(line);
+            fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, `## Refresh Prices\n\n- ${line}\n`);
+          ' "$TMP_BODY"
 
   discover-catalog:
     if: github.event_name == 'workflow_dispatch' || github.event.schedule == '0 3 * * 0'
@@ -23,6 +47,30 @@ jobs:
     steps:
       - name: Trigger catalog discovery batch
         run: |
-          curl --fail --show-error --silent \
+          URL="${{ secrets.APP_URL }}/api/cron/ingest?limit=50&discoverLimit=500&source=github-actions&job=discover-catalog"
+          TMP_BODY="$(mktemp)"
+          HTTP_CODE="$(curl --show-error --silent --output "$TMP_BODY" --write-out "%{http_code}" \
             -H "x-cron-secret: ${{ secrets.CRON_SECRET }}" \
-            "${{ secrets.APP_URL }}/api/cron/ingest?limit=50&discoverLimit=500"
+            "$URL")"
+
+          echo "HTTP $HTTP_CODE"
+          cat "$TMP_BODY"
+
+          if [ "$HTTP_CODE" -ne 200 ]; then
+            echo "Ingest request failed with HTTP $HTTP_CODE" >&2
+            exit 1
+          fi
+
+          node -e '
+            const fs = require("fs");
+            const path = process.argv[1];
+            const body = JSON.parse(fs.readFileSync(path, "utf8"));
+            if (!body.success) {
+              console.error("Ingest returned success=false", body);
+              process.exit(1);
+            }
+            const summary = body.summary ?? {};
+            const line = `cardsUpdated=${summary.cardsUpdated ?? 0}, etbsUpdated=${summary.etbsUpdated ?? 0}, count=${body.count ?? 0}, durationMs=${body.durationMs ?? 0}, requestId=${body.requestId ?? "n/a"}`;
+            console.log(line);
+            fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, `## Discover Catalog\n\n- ${line}\n`);
+          ' "$TMP_BODY"

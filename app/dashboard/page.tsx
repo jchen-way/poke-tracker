@@ -3,7 +3,7 @@ import { Activity, BellRing, TrendingUp, AlertTriangle } from 'lucide-react';
 import './page.css';
 import PriceChart from '../components/PriceChart';
 import CardSearch from '../components/CardSearch';
-import { getPriceSeriesForCard } from '../../lib/dataIngestion';
+import { getPriceSeriesForCard, getPriceSeriesForTrackedItem } from '../../lib/dataIngestion';
 import { requireUser } from '../../lib/auth';
 import { fetchDashboardSnapshots } from '../../lib/dashboardData';
 import {
@@ -20,6 +20,7 @@ import prisma from '../../lib/prisma';
 export const dynamic = 'force-dynamic';
 
 type SearchParams = {
+  itemId?: string;
   cardId?: string;
   range?: string;
   q?: string;
@@ -42,38 +43,66 @@ export default async function Home({
   const resolvedSearchParams = await searchParams;
   const activeRange = resolvedSearchParams?.range ?? '1M';
   const searchQuery = resolvedSearchParams?.q?.trim() ?? '';
+  const requestedItemId = resolvedSearchParams?.itemId ?? null;
 
-  const [trackedItems, trackedItemCount, searchResults] = await Promise.all([
+  const [trackedItems, trackedItemCount, searchResults, requestedItem] = await Promise.all([
     prisma.trackedItem.findMany({
+      where: {
+        type: 'CARD',
+      },
       orderBy: { updatedAt: 'desc' },
     }),
-    prisma.trackedItem.count(),
+    prisma.trackedItem.count({
+      where: {
+        type: 'CARD',
+      },
+    }),
     prisma.trackedItem.findMany({
       where: searchQuery
         ? {
+            type: 'CARD',
             OR: [
               { name: { contains: searchQuery, mode: 'insensitive' } },
               { setName: { contains: searchQuery, mode: 'insensitive' } },
               { cardId: { contains: searchQuery, mode: 'insensitive' } },
             ],
           }
-        : undefined,
+        : {
+            type: 'CARD',
+          },
       take: 8,
       orderBy: { updatedAt: 'desc' },
     }),
+    requestedItemId
+      ? prisma.trackedItem.findUnique({
+          where: {
+            id: requestedItemId,
+          },
+        })
+      : Promise.resolve(null),
   ]);
 
   const dashboardSnapshots = await fetchDashboardSnapshots();
 
   const fallbackCardId = trackedItems[0]?.cardId ?? searchResults[0]?.cardId ?? undefined;
-  const activeCardId = resolvedSearchParams?.cardId ?? fallbackCardId;
+  const activeCardId =
+    requestedItem?.type === 'CARD'
+      ? requestedItem.cardId ?? resolvedSearchParams?.cardId ?? fallbackCardId
+      : resolvedSearchParams?.cardId ?? fallbackCardId;
   const activeItem =
+    requestedItem ??
     trackedItems.find((item) => item.cardId === activeCardId) ??
     searchResults.find((item) => item.cardId === activeCardId) ??
     trackedItems[0] ??
     searchResults[0];
 
-  const series = activeCardId ? await getPriceSeriesForCard(activeCardId) : [];
+  const series = activeItem
+    ? activeItem.type === 'ETB'
+      ? await getPriceSeriesForTrackedItem(activeItem.id)
+      : activeCardId
+        ? await getPriceSeriesForCard(activeCardId)
+        : []
+    : [];
   const chartData = filterSeriesByRange(series, activeRange);
   const realSnapshots = filterRealSnapshots(dashboardSnapshots as DashboardSnapshot[]);
   const metricSummary = buildMetricSummary(realSnapshots);
@@ -86,12 +115,16 @@ export default async function Home({
           <h1>
             PokeTracker <span className="text-gradient">Pro</span>
           </h1>
-          <p className="subtitle">Live card pricing, recent moves, and collection coverage from your database.</p>
+          <p className="subtitle">
+            {activeItem?.type === 'ETB'
+              ? 'Viewing a tracked Elite Trainer Box inside the main dashboard.'
+              : 'Live card pricing, recent moves, and collection coverage from your database.'}
+          </p>
         </div>
 
         <div className="header-actions">
-          <Link href="/collections" className="btn-retro blue">
-            View Collection
+          <Link href={activeItem?.type === 'ETB' ? '/etbs' : '/collections'} className="btn-retro blue">
+            {activeItem?.type === 'ETB' ? 'View ETBs' : 'View Collection'}
           </Link>
           <button className="btn-icon hover-scale" aria-label="Notifications" id="btn-notifications">
             <BellRing size={20} />
@@ -171,7 +204,12 @@ export default async function Home({
                 {['1W', '1M', 'YTD'].map((range) => (
                   <Link
                     key={range}
-                    href={`/dashboard?cardId=${encodeURIComponent(activeCardId ?? '')}&range=${range}${searchQuery ? `&q=${encodeURIComponent(searchQuery)}` : ''}`}
+                    href={`/dashboard?${buildDashboardRangeParams({
+                      itemId: activeItem?.type === 'ETB' ? activeItem.id : null,
+                      cardId: activeItem?.type === 'CARD' ? activeCardId ?? null : null,
+                      range,
+                      q: searchQuery || (activeItem?.type === 'ETB' ? activeItem.name : ''),
+                    })}`}
                     className={`chip ${activeRange === range ? 'active' : ''}`}
                   >
                     {range}
@@ -189,7 +227,7 @@ export default async function Home({
               items={trackedItems.map(mapSearchItem)}
             />
             <div className="tracked-summary text-muted">
-              {trackedItemCount} tracked now
+              {activeItem?.type === 'ETB' ? `${trackedItemCount} cards tracked now` : `${trackedItemCount} tracked now`}
             </div>
           </div>
 
@@ -309,4 +347,29 @@ function mapSearchItem(item: SearchItem) {
     setName: item.setName,
     number: item.number,
   };
+}
+
+function buildDashboardRangeParams({
+  itemId,
+  cardId,
+  range,
+  q,
+}: {
+  itemId?: string | null;
+  cardId?: string | null;
+  range: string;
+  q?: string;
+}) {
+  const params = new URLSearchParams();
+  params.set('range', range);
+  if (itemId) {
+    params.set('itemId', itemId);
+  }
+  if (cardId) {
+    params.set('cardId', cardId);
+  }
+  if (q) {
+    params.set('q', q);
+  }
+  return params.toString();
 }

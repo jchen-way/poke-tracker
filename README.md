@@ -16,6 +16,9 @@ Create `tracker_app/.env` from `tracker_app/.env.example` and set:
 - `EBAY_ENV`: usually `production`
 - `EBAY_MARKETPLACE_ID`: usually `EBAY_US`
 - `TCGDEX_LANGUAGE`: API language, usually `en`
+- `CARD_SYNC_LIMIT`: how many tracked cards to refresh per ingest run
+- `ETB_SYNC_LIMIT`: how many tracked ETBs to refresh per ingest run
+- `ETB_CATALOG_SYNC_LIMIT`: how many ETB catalog entries to validate per ingest run
 
 ## Database Setup
 
@@ -36,6 +39,13 @@ npm run dev
 
 Open [http://localhost:3000](http://localhost:3000).
 
+Protected app pages include:
+
+- `/dashboard` for card tracking
+- `/collections` for tracked cards only
+- `/etbs` for ETBs derived from TCGdex Pokemon sets and background-validated against eBay
+- `/watchlist` for prioritized cards and ETBs
+
 ## Ingestion
 
 Trigger a sync manually:
@@ -45,6 +55,7 @@ curl -H "x-cron-secret: YOUR_CRON_SECRET" "http://localhost:3000/api/cron/ingest
 ```
 
 By default, ingest now refreshes only the stalest tracked cards instead of trying to re-fetch the whole catalog on every run.
+Tracked ETBs are also refreshed in smaller eBay-backed batches during the same job.
 
 To expand the tracked catalog in batches, use `discoverLimit`:
 

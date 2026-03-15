@@ -25,6 +25,17 @@
   align-items: end;
 }
 
+.etb-add-grid {
+  display: grid;
+  grid-template-columns: 1.4fr 1fr auto;
+  gap: 0.9rem;
+  align-items: end;
+}
+
+.etb-filter-grid {
+  grid-template-columns: 1.4fr 0.8fr 0.8fr 1fr auto;
+}
+
 .filter-field {
   display: flex;
   flex-direction: column;
@@ -200,7 +211,7 @@
 
 .collection-card-top {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 64px;
+  grid-template-columns: minmax(0, 1fr) 92px;
   gap: 1rem;
   min-height: 108px;
 }
@@ -239,9 +250,9 @@
   flex-direction: column;
   gap: 0.35rem;
   align-items: flex-end;
-  width: 64px;
-  min-width: 64px;
-  max-width: 64px;
+  width: 92px;
+  min-width: 92px;
+  max-width: 92px;
   overflow: hidden;
 }
 
@@ -252,6 +263,13 @@
   width: 100%;
   text-align: right;
   overflow-wrap: anywhere;
+}
+
+.collection-price-caption {
+  font-size: 0.68rem;
+  line-height: 1.1;
+  text-align: right;
+  color: var(--color-text-muted);
 }
 
 .collection-meta-row {
@@ -325,6 +343,11 @@
     grid-template-columns: 1fr 1fr 1fr;
   }
 
+  .etb-add-grid,
+  .etb-filter-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+
   .filter-actions {
     grid-column: 1 / -1;
   }
@@ -336,6 +359,11 @@
   }
 
   .filter-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .etb-add-grid,
+  .etb-filter-grid {
     grid-template-columns: 1fr;
   }
 

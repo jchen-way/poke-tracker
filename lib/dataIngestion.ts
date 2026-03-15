@@ -1,6 +1,8 @@
 import prisma from './prisma';
 import { normalizeCardImageUrl } from './cardImages';
-import { buildEbaySearchQuery } from './ebaySearch';
+import { ensureEtbDisplayName } from './etbTracking';
+import { buildEbayEtbSearchQuery, buildEbaySearchQuery } from './ebaySearch';
+import { deriveEtbCatalogCandidates } from './etbCatalog';
 
 const TCGDEX_LANGUAGE = process.env.TCGDEX_LANGUAGE ?? 'en';
 const TCGDEX_API_URL =
@@ -26,6 +28,8 @@ const EBAY_ENRICHMENT_LIMIT = parsePositiveInt(
   process.env.EBAY_ENRICHMENT_LIMIT,
   CARD_SYNC_LIMIT,
 );
+const ETB_SYNC_LIMIT = parsePositiveInt(process.env.ETB_SYNC_LIMIT, 12);
+const ETB_CATALOG_SYNC_LIMIT = parsePositiveInt(process.env.ETB_CATALOG_SYNC_LIMIT, 120);
 
 let ebayAppTokenCache:
   | {
@@ -66,12 +70,19 @@ type EbayMarketSnapshot = {
   medianPrice: number | null;
   sampleSize: number;
   lowListingUrl: string | null;
+  lowImageUrl: string | null;
+  medianImageUrl: string | null;
 };
 
-type EbaySearchContext = {
+type EbayCardSearchContext = {
   cardName: string;
   setName: string | null;
   localId: string | null;
+};
+
+type EbayEtbSearchContext = {
+  name: string;
+  setName: string | null;
 };
 
 type SyncOptions = {
@@ -79,6 +90,7 @@ type SyncOptions = {
   historyDays?: number;
   historyPoints?: number;
   discoverLimit?: number;
+  etbLimit?: number;
 };
 
 /**
@@ -87,11 +99,13 @@ type SyncOptions = {
 export async function syncPokemonMarketData(options: SyncOptions = {}) {
   console.log('[Ingestion Tracker] Starting TCGdex sync loop...');
   const limit = options.limit ?? CARD_SYNC_LIMIT;
+  const etbLimit = options.etbLimit ?? ETB_SYNC_LIMIT;
   const historyDays = Math.max(options.historyDays ?? 0, 0);
   const historyPoints = Math.max(options.historyPoints ?? historyDays, 0);
   const discoverLimit = Math.max(options.discoverLimit ?? 0, 0);
   const trackedCount = await prisma.trackedItem.count({
     where: {
+      type: 'CARD',
       cardId: {
         not: null,
       },
@@ -104,6 +118,7 @@ export async function syncPokemonMarketData(options: SyncOptions = {}) {
 
   const refreshTargets = await prisma.trackedItem.findMany({
     where: {
+      type: 'CARD',
       cardId: {
         not: null,
       },
@@ -155,11 +170,12 @@ export async function syncPokemonMarketData(options: SyncOptions = {}) {
               setName: card.set?.name ?? null,
               localId: card.localId ?? null,
             }),
-            context: {
-              cardName: card.name,
-              setName: card.set?.name ?? null,
-              localId: card.localId ?? null,
-            },
+            isRelevantMatch: (title) =>
+              isRelevantEbayCardListing(title, {
+                cardName: card.name,
+                setName: card.set?.name ?? null,
+                localId: card.localId ?? null,
+              }),
           })
         : null;
     const ebayPrice = ebayMarket?.medianPrice ?? null;
@@ -213,14 +229,18 @@ export async function syncPokemonMarketData(options: SyncOptions = {}) {
     });
   }
 
+  await syncEtbCatalog(ETB_CATALOG_SYNC_LIMIT);
+  const etbResults = await syncTrackedEtbs(etbLimit);
+
   console.log('[Ingestion Tracker] TCGdex sync complete!');
-  return results;
+  return [...results, ...etbResults];
 }
 
 export async function getPriceSeriesForCard(cardId: string) {
   const snapshots = await prisma.priceSnapshot.findMany({
     where: {
       item: {
+        type: 'CARD',
         cardId,
       },
     },
@@ -229,12 +249,35 @@ export async function getPriceSeriesForCard(cardId: string) {
     },
   });
 
+  return buildPriceSeries(snapshots);
+}
+
+export async function getPriceSeriesForTrackedItem(trackedItemId: string) {
+  const snapshots = await prisma.priceSnapshot.findMany({
+    where: {
+      trackedItemId,
+    },
+    orderBy: {
+      date: 'asc',
+    },
+  });
+
+  return buildPriceSeries(snapshots);
+}
+
+function buildPriceSeries(
+  snapshots: Array<{
+    date: Date;
+    fairValue: number | null;
+    tcgplayerPrice: number | null;
+    ebayPrice: number | null;
+    ebayLowPrice: number | null;
+    volume: number | null;
+  }>,
+) {
   if (!snapshots.length) return [];
 
-  const closes = snapshots.map((snap) => {
-    const base = chooseChartPrice(snap);
-    return base;
-  });
+  const closes = snapshots.map((snap) => chooseChartPrice(snap));
 
   const ema = (period: number) => {
     const k = 2 / (period + 1);
@@ -438,6 +481,201 @@ async function discoverTrackedCards(limit: number) {
   }
 }
 
+async function syncTrackedEtbs(limit: number) {
+  if (limit <= 0) {
+    return [];
+  }
+
+  const trackedEtbs = await prisma.trackedItem.findMany({
+    where: {
+      type: 'ETB',
+    },
+    orderBy: [
+      { watchlistEntries: { _count: 'desc' } },
+      { priorityScore: 'desc' },
+      { lastPriceCheckAt: { sort: 'asc', nulls: 'first' } },
+      { updatedAt: 'asc' },
+    ],
+    take: limit,
+  });
+
+  const results = [];
+
+  for (const trackedEtb of trackedEtbs) {
+    const refreshed = await refreshTrackedEtb(trackedEtb.id);
+    if (refreshed) {
+      results.push(refreshed);
+    }
+  }
+
+  return results;
+}
+
+async function syncEtbCatalog(limit: number) {
+  if (limit <= 0) {
+    return;
+  }
+
+  const candidates = await deriveEtbCatalogCandidates();
+  if (!candidates.length) {
+    return;
+  }
+
+  for (const candidate of candidates) {
+    await prisma.etbCatalogEntry.upsert({
+      where: { trackedId: candidate.trackedId },
+      update: {
+        sourceSetId: candidate.sourceSetId,
+        name: candidate.name,
+        setName: candidate.setName,
+      },
+      create: {
+        trackedId: candidate.trackedId,
+        sourceSetId: candidate.sourceSetId,
+        name: candidate.name,
+        setName: candidate.setName,
+      },
+    });
+  }
+
+  const targets = await prisma.etbCatalogEntry.findMany({
+    where: {
+      trackedId: { in: candidates.map((candidate) => candidate.trackedId) },
+    },
+    orderBy: [
+      { isValidated: 'asc' },
+      { lastValidatedAt: { sort: 'asc', nulls: 'first' } },
+      { updatedAt: 'asc' },
+    ],
+    take: limit,
+  });
+
+  for (const target of targets) {
+    const preview = await fetchEtbMarketPreview({
+      name: target.name,
+      setName: target.setName,
+    });
+    const trusted = hasTrustedEtbMarketPreview(preview);
+
+    await prisma.etbCatalogEntry.update({
+      where: { id: target.id },
+      data: {
+        imageUrl: trusted ? (preview?.medianImageUrl ?? preview?.lowImageUrl ?? null) : null,
+        ebayMedianPrice: trusted ? preview?.medianPrice ?? null : null,
+        ebayLowPrice: trusted ? preview?.lowPrice ?? null : null,
+        ebaySampleSize: trusted ? preview?.sampleSize ?? null : null,
+        ebayListingUrl: trusted ? preview?.lowListingUrl ?? null : null,
+        isValidated: trusted,
+        lastValidatedAt: new Date(),
+      },
+    });
+  }
+}
+
+export async function refreshTrackedEtb(trackedItemId: string) {
+  const trackedEtb = await prisma.trackedItem.findUnique({
+    where: { id: trackedItemId },
+  });
+
+  if (!trackedEtb || trackedEtb.type !== 'ETB') {
+    return null;
+  }
+
+  const ebayMarket = hasEbayCredentials()
+    ? await fetchEbayMarketSnapshot({
+        query: buildEbayEtbSearchQuery({
+          name: trackedEtb.name,
+          setName: trackedEtb.setName,
+        }),
+        isRelevantMatch: (title) =>
+          isRelevantEbayEtbListing(title, {
+            name: trackedEtb.name,
+            setName: trackedEtb.setName,
+          }),
+      })
+    : null;
+
+  const ebayPrice = ebayMarket?.medianPrice ?? null;
+  const ebayLowPrice = ebayMarket?.lowPrice ?? null;
+  const fairValue = calculateEtbFairValue({
+    ebayMedianPrice: ebayPrice,
+    ebayLowPrice,
+  });
+
+  if (fairValue == null && ebayPrice == null && ebayLowPrice == null) {
+    await prisma.trackedItem.update({
+      where: { id: trackedEtb.id },
+      data: { lastPriceCheckAt: new Date() },
+    });
+    return null;
+  }
+
+  await prisma.trackedItem.update({
+    where: { id: trackedEtb.id },
+    data: {
+      name: ensureEtbDisplayName(trackedEtb.name),
+      setName: trackedEtb.setName,
+      imageUrl: ebayMarket?.medianImageUrl ?? ebayMarket?.lowImageUrl ?? trackedEtb.imageUrl,
+      lastPriceCheckAt: new Date(),
+    },
+  });
+
+  const priceSnap = await createSnapshot({
+    trackedItemId: trackedEtb.id,
+    fairValue,
+    tcgplayerPrice: null,
+    ebayPrice,
+    ebayLowPrice,
+    ebaySampleSize: ebayMarket?.sampleSize ?? null,
+    ebayLowListingUrl: ebayMarket?.lowListingUrl ?? null,
+    isSynthetic: false,
+    date: new Date(),
+  });
+
+  return {
+    item: trackedEtb.name,
+    cardId: trackedEtb.cardId,
+    newPriceId: priceSnap.id,
+    type: trackedEtb.type,
+  };
+}
+
+function hasTrustedEtbMarketPreview(preview: EbayMarketSnapshot | null) {
+  if (!preview) {
+    return false;
+  }
+
+  return (
+    preview.sampleSize >= 2 &&
+    (preview.medianPrice ?? 0) >= 20 &&
+    (preview.lowPrice ?? 0) >= 15
+  );
+}
+
+export async function fetchEtbMarketPreview({
+  name,
+  setName,
+}: {
+  name: string;
+  setName: string | null;
+}) {
+  if (!hasEbayCredentials()) {
+    return null;
+  }
+
+  return fetchEbayMarketSnapshot({
+    query: buildEbayEtbSearchQuery({
+      name,
+      setName,
+    }),
+    isRelevantMatch: (title) =>
+      isRelevantEbayEtbListing(title, {
+        name,
+        setName,
+      }),
+  });
+}
+
 async function fetchTcgdexCard(cardId: string): Promise<TcgdexCard> {
   const response = await fetch(createTcgdexUrl(['cards', cardId]), {
     cache: 'no-store',
@@ -547,10 +785,10 @@ function parsePositiveInt(value: string | undefined, fallback: number): number {
 
 async function fetchEbayMarketSnapshot({
   query,
-  context,
+  isRelevantMatch,
 }: {
   query: string;
-  context: EbaySearchContext;
+  isRelevantMatch: (title: string) => boolean;
 }): Promise<EbayMarketSnapshot | null> {
   if (!hasEbayCredentials()) {
     console.log('[eBay] missing EBAY_CLIENT_ID/EBAY_CLIENT_SECRET, skipping');
@@ -586,14 +824,13 @@ async function fetchEbayMarketSnapshot({
       itemSummaries?: Array<{
         title?: string;
         itemWebUrl?: string;
+        image?: { imageUrl?: string };
         price?: { value?: string };
         shippingOptions?: Array<{ shippingCost?: { value?: string } }>;
       }>;
     } =
       await res.json();
-    const items = (json.itemSummaries ?? []).filter((item) =>
-      isRelevantEbayListing(item.title ?? '', context),
-    );
+    const items = (json.itemSummaries ?? []).filter((item) => isRelevantMatch(item.title ?? ''));
     if (!items.length) return null;
 
     const pricedItems = items
@@ -605,10 +842,14 @@ async function fetchEbayMarketSnapshot({
           ? {
               total: Number(total.toFixed(2)),
               itemWebUrl: item.itemWebUrl ?? null,
+              imageUrl: item.image?.imageUrl ?? null,
             }
           : null;
       })
-      .filter((value): value is { total: number; itemWebUrl: string | null } => Boolean(value));
+      .filter(
+        (value): value is { total: number; itemWebUrl: string | null; imageUrl: string | null } =>
+          Boolean(value),
+      );
 
     if (!pricedItems.length) return null;
 
@@ -624,6 +865,8 @@ async function fetchEbayMarketSnapshot({
       medianPrice: Number(medianPrice.toFixed(2)),
       sampleSize: sorted.length,
       lowListingUrl: sorted[0].itemWebUrl,
+      lowImageUrl: sorted[0].imageUrl,
+      medianImageUrl: sorted[middle]?.imageUrl ?? sorted[0].imageUrl,
     };
   } catch (err) {
     console.log('[eBay] fetch error', err);
@@ -631,7 +874,7 @@ async function fetchEbayMarketSnapshot({
   }
 }
 
-function isRelevantEbayListing(title: string, context: EbaySearchContext) {
+function isRelevantEbayCardListing(title: string, context: EbayCardSearchContext) {
   const normalizedTitle = normalizeSearchText(title);
   const normalizedCompactTitle = normalizeCompactText(title);
   if (!normalizedTitle) {
@@ -697,6 +940,118 @@ function isRelevantEbayListing(title: string, context: EbaySearchContext) {
   }
 
   return normalizedTitle.includes('pokemon');
+}
+
+function isRelevantEbayEtbListing(title: string, context: EbayEtbSearchContext) {
+  const normalizedTitle = normalizeSearchText(title);
+  if (!normalizedTitle) {
+    return false;
+  }
+
+  const excludedTerms = [
+    'booster',
+    'bundle',
+    'pack',
+    'packs',
+    'code',
+    'code card',
+    'digital',
+    'online',
+    'tcg live',
+    'ptcgl',
+    'ptcgo',
+    'player s guide',
+    "player's guide",
+    'guide',
+    'booklet',
+    'sleeves',
+    'card sleeves',
+    'sleeve pack',
+    'dice',
+    'damage counter',
+    'damage counters',
+    'divider',
+    'dividers',
+    'marker',
+    'markers',
+    'coin',
+    'coins',
+    'deck box',
+    'accessories',
+    'accessory',
+    'contents',
+    'empty etb',
+    'box only',
+    'no packs',
+    'without packs',
+    'wrapper',
+    'sealed case',
+    'lot',
+    'case',
+    'display',
+    'empty',
+    'opened',
+    'open box',
+    'damaged',
+    'binder',
+    'tin',
+    'blister',
+    'poster',
+    'trainer toolkit',
+    'collection box',
+    'pokemon center',
+    'pc exclusive',
+    'psa',
+    'bgs',
+    'cgc',
+    'graded',
+    'slab',
+  ];
+
+  if (excludedTerms.some((term) => normalizedTitle.includes(term))) {
+    return false;
+  }
+
+  if (!normalizedTitle.includes('elite trainer box')) {
+    return false;
+  }
+
+  if (!normalizedTitle.includes('pokemon')) {
+    return false;
+  }
+
+  const positiveSignals = [
+    'factory sealed',
+    'brand new',
+    'new sealed',
+    'sealed box',
+    'sealed',
+  ];
+
+  const hasPositiveSignal = positiveSignals.some((term) => normalizedTitle.includes(term));
+  const hasExplicitEtbBox =
+    normalizedTitle.includes('elite trainer box') &&
+    !normalizedTitle.includes('card sleeves') &&
+    !normalizedTitle.includes('deck box');
+
+  if (!hasPositiveSignal && !hasExplicitEtbBox) {
+    return false;
+  }
+
+  const normalizedName = normalizeSearchText(
+    ensureEtbDisplayName(context.name).replace(/\s*elite trainer box$/i, ''),
+  );
+  const setTokens = tokenizeSearchText(context.setName ?? normalizedName)
+    .filter((token) => token.length > 2)
+    .filter((token) => !['trainer', 'elite', 'box', 'pokemon', 'tcg'].includes(token));
+
+  if (!setTokens.length) {
+    return true;
+  }
+
+  const matchedTokenCount = setTokens.filter((token) => normalizedTitle.includes(token)).length;
+  const requiredMatches = Math.min(1, setTokens.length);
+  return matchedTokenCount >= requiredMatches;
 }
 
 function normalizeSearchText(value: string) {
@@ -774,6 +1129,16 @@ function calculateFairValue({
     sortedValues.length >= 2 ? (baseConsensus + medianValue) / 2 : baseConsensus;
 
   return Number(dampedConsensus.toFixed(2));
+}
+
+function calculateEtbFairValue({
+  ebayMedianPrice,
+  ebayLowPrice,
+}: {
+  ebayMedianPrice: number | null;
+  ebayLowPrice: number | null;
+}) {
+  return ebayMedianPrice ?? ebayLowPrice;
 }
 
 function chooseChartPrice(snapshot: {

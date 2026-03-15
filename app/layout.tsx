@@ -3,7 +3,7 @@ import './globals.css';
 
 export const metadata: Metadata = {
   title: 'PokeTracker | Real-time Market Analysis',
-  description: 'Track Pokemon cards and ETBs with real-time technical analysis and arbitrage detection.',
+  description: 'Track Pokemon cards and ETBs with live pricing, watchlists, and cross-market comparison.',
 };
 
 import Navbar from './components/Navbar';

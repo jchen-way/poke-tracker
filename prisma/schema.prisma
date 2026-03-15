@@ -35,6 +35,25 @@ model TrackedItem {
   watchlistEntries WatchlistItem[]
 }
 
+model EtbCatalogEntry {
+  id               String   @id @default(uuid())
+  trackedId        String   @unique
+  sourceSetId      String?
+  name             String
+  setName          String
+  imageUrl         String?
+  ebayMedianPrice  Float?
+  ebayLowPrice     Float?
+  ebaySampleSize   Int?
+  ebayListingUrl   String?
+  isValidated      Boolean  @default(false)
+  lastValidatedAt  DateTime?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@index([isValidated, lastValidatedAt])
+}
+
 model PriceSnapshot {
   id             String      @id @default(uuid())
   trackedItemId  String

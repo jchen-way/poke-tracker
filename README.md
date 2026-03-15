@@ -9,6 +9,12 @@ Create `tracker_app/.env` from `tracker_app/.env.example` and set:
 - `DATABASE_URL`: your hosted Postgres connection string
 - `AUTH_SECRET`: a long random string used to sign login sessions
 - `CRON_SECRET`: a long random string used to authorize scheduled ingestion requests
+- `GOOGLE_CLIENT_ID`: your Google OAuth web app client ID for Google sign-in
+- `GOOGLE_CLIENT_SECRET`: your Google OAuth web app client secret
+- `GOOGLE_REDIRECT_URI`: optional explicit Google OAuth callback URL, otherwise defaults to `/api/auth/google/callback`
+- `RESEND_API_KEY`: API key for outbound signal emails
+- `EMAIL_FROM`: verified sender address for outbound emails
+- `APP_BASE_URL`: public app URL used in email links, for example `https://poke-tracks.vercel.app`
 - `EBAY_ACCOUNT_DELETION_ENDPOINT`: your deployed eBay notification callback URL
 - `EBAY_VERIFICATION_TOKEN`: the token you enter in the eBay developer console
 - `EBAY_CLIENT_ID`: your eBay production App ID / Client ID
@@ -45,6 +51,19 @@ Protected app pages include:
 - `/collections` for tracked cards only
 - `/etbs` for ETBs derived from TCGdex Pokemon sets and background-validated against eBay
 - `/watchlist` for prioritized cards and ETBs
+- `/settings` for account settings, password updates, display name, and email signal preferences
+
+Authentication supports:
+
+- email/password registration and login
+- Google sign-in when `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` are configured
+
+Email notifications:
+
+- are sent after ingest runs when `RESEND_API_KEY` and `EMAIL_FROM` are configured
+- respect the user's `/settings` preference
+- are scoped to new signals on cards in that user's watchlist
+- are deduped so the same signal snapshot is not emailed repeatedly on every cron run
 
 ## Ingestion
 

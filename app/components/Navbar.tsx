@@ -21,7 +21,9 @@ export default async function Navbar() {
 
         {user ? (
           <div className="nav-auth">
-            <span className="nav-user">{user.email}</span>
+            <Link href="/settings" className="nav-user">
+              {user.displayName || user.email}
+            </Link>
             <form action={logoutAction}>
               <button type="submit" className="btn-retro">
                 <UserCircle size={18} />

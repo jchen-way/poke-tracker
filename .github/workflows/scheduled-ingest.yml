@@ -13,13 +13,16 @@ jobs:
     steps:
       - name: Trigger price refresh batch
         run: |
-          URL="${{ secrets.APP_URL }}/api/cron/ingest?limit=100&source=github-actions&job=refresh-prices"
+          URL="${{ secrets.APP_URL%/ }}/api/cron/ingest?limit=100&source=github-actions&job=refresh-prices"
           TMP_BODY="$(mktemp)"
-          HTTP_CODE="$(curl --show-error --silent --output "$TMP_BODY" --write-out "%{http_code}" \
+          CURL_META="$(curl --location --show-error --silent --output "$TMP_BODY" --write-out "%{http_code} %{url_effective}" \
             -H "x-cron-secret: ${{ secrets.CRON_SECRET }}" \
             "$URL")"
+          HTTP_CODE="${CURL_META%% *}"
+          EFFECTIVE_URL="${CURL_META#* }"
 
           echo "HTTP $HTTP_CODE"
+          echo "Effective URL: $EFFECTIVE_URL"
           cat "$TMP_BODY"
 
           if [ "$HTTP_CODE" -ne 200 ]; then
@@ -47,13 +50,16 @@ jobs:
     steps:
       - name: Trigger catalog discovery batch
         run: |
-          URL="${{ secrets.APP_URL }}/api/cron/ingest?limit=50&discoverLimit=500&source=github-actions&job=discover-catalog"
+          URL="${{ secrets.APP_URL%/ }}/api/cron/ingest?limit=50&discoverLimit=500&source=github-actions&job=discover-catalog"
           TMP_BODY="$(mktemp)"
-          HTTP_CODE="$(curl --show-error --silent --output "$TMP_BODY" --write-out "%{http_code}" \
+          CURL_META="$(curl --location --show-error --silent --output "$TMP_BODY" --write-out "%{http_code} %{url_effective}" \
             -H "x-cron-secret: ${{ secrets.CRON_SECRET }}" \
             "$URL")"
+          HTTP_CODE="${CURL_META%% *}"
+          EFFECTIVE_URL="${CURL_META#* }"
 
           echo "HTTP $HTTP_CODE"
+          echo "Effective URL: $EFFECTIVE_URL"
           cat "$TMP_BODY"
 
           if [ "$HTTP_CODE" -ne 200 ]; then

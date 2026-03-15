@@ -1,47 +1,54 @@
 import Link from 'next/link';
 import Image from 'next/image';
 import { Leaf, Droplets, Flame, ArrowRight, Zap } from 'lucide-react';
+import CursorAura from './components/CursorAura';
+import PointerTilt from './components/PointerTilt';
 
 export default function LandingPage() {
   return (
     <div className="landing-container fade-in">
+      <CursorAura variant="landing" />
       <section className="hero-section">
-        <div className="hero-content retro-panel">
-          <h1 className="pixel-text">Catch Market Trends.</h1>
-          <p className="hero-subtitle text-muted">A calming, real-time tracking dashboard for your collection. Never miss a price dip, never miss a spike. Find your peace in the market.</p>
-          <div className="hero-actions">
-            <Link href="/dashboard" className="btn-retro blue">
-              Start Tracking <ArrowRight size={18}/>
-            </Link>
-            <Link href="/about" className="btn-retro clear pixel-text">
-              Learn More
-            </Link>
+        <PointerTilt className="hero-content-shell" maxTilt={3} glow={false}>
+          <div className="hero-content retro-panel">
+            <h1 className="pixel-text">Catch Market Trends.</h1>
+            <p className="hero-subtitle text-muted">A calming, real-time tracking dashboard for your collection. Never miss a price dip, never miss a spike. Find your peace in the market.</p>
+            <div className="hero-actions">
+              <Link href="/dashboard" className="btn-retro blue">
+                Start Tracking <ArrowRight size={18}/>
+              </Link>
+              <Link href="/about" className="btn-retro clear pixel-text">
+                Learn More
+              </Link>
+            </div>
           </div>
-        </div>
-        <div className="hero-image-placeholder">
-          <div className="hero-illustration">
-            <Image
-              src="/psyduck-trend.png"
-              alt="Psyduck riding an upward market arrow"
-              width={554}
-              height={457}
-              priority
-              className="hero-art-image"
-            />
+        </PointerTilt>
+        <PointerTilt className="hero-image-shell" maxTilt={10}>
+          <div className="hero-image-placeholder">
+            <div className="hero-illustration">
+              <Image
+                src="/psyduck-trend.png"
+                alt="Psyduck riding an upward market arrow"
+                width={554}
+                height={457}
+                priority
+                className="hero-art-image"
+              />
+            </div>
+            <div className="floating-element pika">
+              <Zap size={32} color="#fbbf24" fill="#fbbf24" />
+            </div>
+            <div className="floating-element leaf">
+              <Leaf size={32} color="#a8e6cf" fill="#a8e6cf" />
+            </div>
+            <div className="floating-element water">
+              <Droplets size={32} color="#a0c4ff" fill="#a0c4ff" />
+            </div>
+            <div className="floating-element fire">
+              <Flame size={32} color="#ffaaa5" fill="#ffaaa5" />
+            </div>
           </div>
-          <div className="floating-element pika">
-            <Zap size={32} color="#fbbf24" fill="#fbbf24" />
-          </div>
-          <div className="floating-element leaf">
-            <Leaf size={32} color="#a8e6cf" fill="#a8e6cf" />
-          </div>
-          <div className="floating-element water">
-            <Droplets size={32} color="#a0c4ff" fill="#a0c4ff" />
-          </div>
-          <div className="floating-element fire">
-            <Flame size={32} color="#ffaaa5" fill="#ffaaa5" />
-          </div>
-        </div>
+        </PointerTilt>
       </section>
 
       <section className="features-section">
@@ -86,6 +93,13 @@ export default function LandingPage() {
           flex: 1;
           padding: 3rem;
           max-width: 600px;
+          position: relative;
+          z-index: 1;
+        }
+
+        .hero-content-shell,
+        .hero-image-shell {
+          flex: 1;
         }
 
         .hero-subtitle {
@@ -101,9 +115,9 @@ export default function LandingPage() {
         }
 
         .hero-image-placeholder {
-          flex: 1;
           position: relative;
           height: 400px;
+          width: 100%;
           background:
             radial-gradient(circle at top right, rgba(160, 196, 255, 0.18), transparent 38%),
             radial-gradient(circle at bottom left, rgba(255, 170, 165, 0.16), transparent 34%),
@@ -115,6 +129,7 @@ export default function LandingPage() {
           align-items: center;
           justify-content: center;
           overflow: hidden;
+          isolation: isolate;
         }
 
         .hero-illustration {

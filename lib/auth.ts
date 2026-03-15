@@ -4,7 +4,9 @@ import { cookies } from 'next/headers';
 import prisma from './prisma';
 
 const SESSION_COOKIE_NAME = 'pokemon_tracker_session';
+const GOOGLE_STATE_COOKIE_NAME = 'pokemon_tracker_google_state';
 const SESSION_TTL_MS = 1000 * 60 * 60 * 24 * 30;
+const GOOGLE_STATE_TTL_MS = 1000 * 60 * 10;
 
 type SessionPayload = {
   userId: string;
@@ -13,7 +15,16 @@ type SessionPayload = {
 };
 
 function getAuthSecret() {
-  return process.env.AUTH_SECRET ?? 'dev-only-auth-secret-change-me';
+  const secret = process.env.AUTH_SECRET?.trim();
+  if (secret) {
+    return secret;
+  }
+
+  if (process.env.NODE_ENV === 'production') {
+    throw new Error('Missing AUTH_SECRET in production');
+  }
+
+  return 'dev-only-auth-secret-change-me';
 }
 
 function toBase64Url(value: string) {
@@ -88,15 +99,11 @@ function parseSessionValue(value: string): SessionPayload | null {
 
 export async function createSession(userId: string, email: string) {
   const expires = Date.now() + SESSION_TTL_MS;
-  const value = createSessionValue({ userId, email, exp: expires });
+  const value = createSessionCookieValue(userId, email, expires);
   const cookieStore = await cookies();
 
   cookieStore.set(SESSION_COOKIE_NAME, value, {
-    httpOnly: true,
-    sameSite: 'lax',
-    secure: process.env.NODE_ENV === 'production',
-    path: '/',
-    expires: new Date(expires),
+    ...getSessionCookieOptions(expires),
   });
 }
 
@@ -126,6 +133,9 @@ export async function getCurrentUser() {
     select: {
       id: true,
       email: true,
+      displayName: true,
+      emailNotificationsEnabled: true,
+      authProvider: true,
       createdAt: true,
     },
   });
@@ -138,4 +148,59 @@ export async function requireUser(redirectTo = '/login') {
   }
 
   return user;
+}
+
+export function createGoogleOauthState() {
+  return randomBytes(24).toString('base64url');
+}
+
+export async function storeGoogleOauthState(state: string) {
+  const cookieStore = await cookies();
+  cookieStore.set(GOOGLE_STATE_COOKIE_NAME, state, {
+    ...getGoogleStateCookieOptions(),
+  });
+}
+
+export async function consumeGoogleOauthState(expectedState: string) {
+  const cookieStore = await cookies();
+  const storedState = cookieStore.get(GOOGLE_STATE_COOKIE_NAME)?.value ?? null;
+  cookieStore.delete(GOOGLE_STATE_COOKIE_NAME);
+
+  if (!storedState || !expectedState) {
+    return false;
+  }
+
+  return safeEqual(storedState, expectedState);
+}
+
+export function createSessionCookieValue(userId: string, email: string, expires = Date.now() + SESSION_TTL_MS) {
+  return createSessionValue({ userId, email, exp: expires });
+}
+
+export function getSessionCookieOptions(expires = Date.now() + SESSION_TTL_MS) {
+  return {
+    httpOnly: true,
+    sameSite: 'lax' as const,
+    secure: process.env.NODE_ENV === 'production',
+    path: '/',
+    expires: new Date(expires),
+  };
+}
+
+export function getGoogleStateCookieOptions() {
+  return {
+    httpOnly: true,
+    sameSite: 'lax' as const,
+    secure: process.env.NODE_ENV === 'production',
+    path: '/',
+    expires: new Date(Date.now() + GOOGLE_STATE_TTL_MS),
+  };
+}
+
+export function getGoogleStateCookieName() {
+  return GOOGLE_STATE_COOKIE_NAME;
+}
+
+export function getSessionCookieName() {
+  return SESSION_COOKIE_NAME;
 }

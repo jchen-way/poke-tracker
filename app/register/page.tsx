@@ -59,6 +59,10 @@ export default async function RegisterPage({
             Register
           </button>
 
+          <a href="/api/auth/google/start" className="btn-retro clear auth-submit auth-google">
+            Sign up with Google
+          </a>
+
           <div className="auth-footer text-muted text-center">
             Already have an account? <Link href="/login" className="auth-link">Login</Link>
           </div>
@@ -134,6 +138,10 @@ export default async function RegisterPage({
         .auth-submit {
           width: 100%;
           justify-content: center;
+        }
+
+        .auth-google {
+          display: inline-flex;
         }
 
         .auth-footer {

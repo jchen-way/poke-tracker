@@ -8,13 +8,18 @@ datasource db {
 }
 
 model User {
-  id        String          @id @default(uuid())
-  email     String          @unique
-  password  String
-  createdAt DateTime        @default(now())
-  updatedAt DateTime        @updatedAt
-  alerts    AlertRule[]
-  watchlist WatchlistItem[]
+  id                        String          @id @default(uuid())
+  email                     String          @unique
+  password                  String          @default("")
+  displayName               String?
+  googleId                  String?         @unique
+  authProvider              String          @default("credentials")
+  emailNotificationsEnabled Boolean         @default(true)
+  createdAt                 DateTime        @default(now())
+  updatedAt                 DateTime        @updatedAt
+  alerts                    AlertRule[]
+  notificationDeliveries    NotificationDelivery[]
+  watchlist                 WatchlistItem[]
 }
 
 model TrackedItem {
@@ -110,5 +115,22 @@ model WatchlistItem {
   user          User        @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([userId, trackedItemId])
+  @@index([trackedItemId, createdAt])
+}
+
+model NotificationDelivery {
+  id            String   @id @default(uuid())
+  userId        String
+  trackedItemId String?
+  signalKey     String
+  signalLabel   String
+  signalTitle   String
+  signalValue   String
+  createdAt     DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, signalKey])
+  @@index([userId, createdAt])
   @@index([trackedItemId, createdAt])
 }

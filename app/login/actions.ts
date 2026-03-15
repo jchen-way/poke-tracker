@@ -21,6 +21,9 @@ export async function loginAction(formData: FormData) {
   }
 
   const user = await prisma.user.findUnique({ where: { email } });
+  if (user?.authProvider === 'google' && !user.password) {
+    redirect('/login?error=google');
+  }
   if (!user || !verifyPassword(password, user.password)) {
     redirect('/login?error=invalid');
   }

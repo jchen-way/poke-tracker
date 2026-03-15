@@ -1,7 +1,7 @@
 import type { NextRequest } from 'next/server';
 import { NextResponse } from 'next/server';
 
-const PROTECTED_PATHS = ['/dashboard', '/collections', '/etbs', '/watchlist'];
+const PROTECTED_PATHS = ['/dashboard', '/collections', '/etbs', '/watchlist', '/settings'];
 
 export function proxy(request: NextRequest) {
   const pathname = request.nextUrl.pathname;
@@ -21,5 +21,5 @@ export function proxy(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ['/dashboard/:path*', '/collections/:path*', '/etbs/:path*', '/watchlist/:path*'],
+  matcher: ['/dashboard/:path*', '/collections/:path*', '/etbs/:path*', '/watchlist/:path*', '/settings/:path*'],
 };

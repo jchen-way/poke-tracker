@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { syncPokemonMarketData } from '../../../../lib/dataIngestion';
+import { sendNewSignalEmails } from '../../../../lib/emailNotifications';
 
 export async function GET(request: Request) {
   const startedAt = Date.now();
@@ -66,6 +67,30 @@ export async function GET(request: Request) {
 
     const results = await syncPokemonMarketData(normalizedOptions);
     const summary = summarizeResults(results);
+    let notifications:
+      | Awaited<ReturnType<typeof sendNewSignalEmails>>
+      | { configured: boolean; error: string; usersChecked: number; usersSkipped: number; emailsSent: number; signalsSent: number };
+
+    try {
+      notifications = await sendNewSignalEmails();
+    } catch (notificationError) {
+      const message =
+        notificationError instanceof Error
+          ? notificationError.message
+          : 'Unknown notification error';
+      console.error('[Ingest Cron] notification failure', {
+        requestId,
+        error: message,
+      });
+      notifications = {
+        configured: true,
+        error: message,
+        usersChecked: 0,
+        usersSkipped: 0,
+        emailsSent: 0,
+        signalsSent: 0,
+      };
+    }
     const durationMs = Date.now() - startedAt;
 
     console.info('[Ingest Cron] success', {
@@ -75,6 +100,7 @@ export async function GET(request: Request) {
       durationMs,
       count: results.length,
       summary,
+      notifications,
     });
 
     return NextResponse.json({
@@ -85,6 +111,7 @@ export async function GET(request: Request) {
       durationMs,
       count: results.length,
       summary,
+      notifications,
       data: results,
     });
   } catch (error: unknown) {

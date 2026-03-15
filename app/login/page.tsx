@@ -11,6 +11,9 @@ type SearchParams = {
 const errorMessages: Record<string, string> = {
   missing: 'Enter your email and password.',
   invalid: 'Invalid email or password.',
+  google: 'This account uses Google sign-in. Use Google or set a password in account settings.',
+  'google-auth': 'Google sign-in failed. Try again.',
+  'google-config': 'Google sign-in is not configured yet.',
 };
 
 export default async function Login({
@@ -51,6 +54,10 @@ export default async function Login({
           <button type="submit" className="btn-retro blue auth-submit">
             Login to PC
           </button>
+
+          <a href="/api/auth/google/start" className="btn-retro clear auth-submit auth-google">
+            Continue with Google
+          </a>
 
           <div className="auth-footer text-muted text-center">
             Don&apos;t have an ID? <Link href="/register" className="auth-link">Register</Link>
@@ -127,6 +134,10 @@ export default async function Login({
         .auth-submit {
           width: 100%;
           justify-content: center;
+        }
+
+        .auth-google {
+          display: inline-flex;
         }
 
         .auth-footer {

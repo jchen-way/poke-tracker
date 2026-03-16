@@ -69,7 +69,7 @@ export default function LandingPage() {
           <div className="feature-card retro-panel">
             <div className="icon-wrap pink"><Flame size={28}/></div>
             <h3 className="pixel-text">Calm Alerts</h3>
-            <p className="text-muted">Get gentle pings on Discord and SMS when it&apos;s the perfect time to buy or sell.</p>
+            <p className="text-muted">Get email alerts when new watchlist signals show up and are worth a closer look.</p>
           </div>
         </div>
       </section>

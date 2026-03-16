@@ -100,7 +100,7 @@ export default async function WatchlistPage({
         <div className="metric-card retro-panel">
           <div className="metric-content">
             <span className="metric-label">Current Cadence</span>
-            <span className="metric-value">Every 3 Hours</span>
+            <span className="metric-value">Every 2 Hours</span>
           </div>
         </div>
       </section>

@@ -2,20 +2,20 @@ name: Scheduled Ingest
 
 on:
   schedule:
-    - cron: '0 */3 * * *'
+    - cron: '0 */2 * * *'
     - cron: '0 3 * * 0'
   workflow_dispatch:
 
 jobs:
   refresh-prices:
-    if: github.event_name == 'workflow_dispatch' || github.event.schedule == '0 */3 * * *'
+    if: github.event_name == 'workflow_dispatch' || github.event.schedule == '0 */2 * * *'
     runs-on: ubuntu-latest
     steps:
       - name: Trigger price refresh batch
         run: |
           APP_URL="${{ secrets.APP_URL }}"
           APP_URL="${APP_URL%/}"
-          URL="${APP_URL}/api/cron/ingest?limit=100&source=github-actions&job=refresh-prices"
+          URL="${APP_URL}/api/cron/ingest?limit=120&source=github-actions&job=refresh-prices"
           TMP_BODY="$(mktemp)"
           CURL_META="$(curl --location --show-error --silent --output "$TMP_BODY" --write-out "%{http_code} %{url_effective}" \
             -H "x-cron-secret: ${{ secrets.CRON_SECRET }}" \
@@ -54,7 +54,7 @@ jobs:
         run: |
           APP_URL="${{ secrets.APP_URL }}"
           APP_URL="${APP_URL%/}"
-          URL="${APP_URL}/api/cron/ingest?limit=50&discoverLimit=500&source=github-actions&job=discover-catalog"
+          URL="${APP_URL}/api/cron/ingest?limit=60&discoverLimit=300&source=github-actions&job=discover-catalog"
           TMP_BODY="$(mktemp)"
           CURL_META="$(curl --location --show-error --silent --output "$TMP_BODY" --write-out "%{http_code} %{url_effective}" \
             -H "x-cron-secret: ${{ secrets.CRON_SECRET }}" \

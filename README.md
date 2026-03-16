@@ -22,7 +22,7 @@ Create `tracker_app/.env` from `tracker_app/.env.example` and set:
 - `EBAY_ENV`: usually `production`
 - `EBAY_MARKETPLACE_ID`: usually `EBAY_US`
 - `TCGDEX_LANGUAGE`: API language, usually `en`
-- `CARD_SYNC_LIMIT`: how many tracked cards to refresh per ingest run
+- `CARD_SYNC_LIMIT`: how many non-watchlist tracked cards to refresh per ingest run
 - `ETB_SYNC_LIMIT`: how many tracked ETBs to refresh per ingest run
 - `ETB_CATALOG_SYNC_LIMIT`: how many ETB catalog entries to validate per ingest run
 
@@ -76,6 +76,12 @@ curl -H "x-cron-secret: YOUR_CRON_SECRET" "http://localhost:3000/api/cron/ingest
 By default, ingest now refreshes only the stalest tracked cards instead of trying to re-fetch the whole catalog on every run.
 Tracked ETBs are also refreshed in smaller eBay-backed batches during the same job.
 
+Card refreshes now use a hybrid queue:
+
+- every watchlisted card is refreshed on every ingest run
+- an additional rotating background batch of tracked cards is refreshed each run using `CARD_SYNC_LIMIT`
+- dashboard signals, opportunities, and discrepancies are computed across all tracked cards using the latest snapshot per card
+
 To expand the tracked catalog in batches, use `discoverLimit`:
 
 ```bash
@@ -100,7 +106,7 @@ curl -H "x-cron-secret: YOUR_CRON_SECRET" "http://localhost:3000/api/cron/ingest
 
 ## Scheduled Ingestion
 
-A GitHub Actions workflow is included at [scheduled-ingest.yml](/Users/jiaweichen/Downloads/pokemon/tracker_app/.github/workflows/scheduled-ingest.yml).
+A GitHub Actions workflow is included at scheduled-ingest.yml
 
 Set these repository secrets before enabling it:
 
@@ -109,7 +115,7 @@ Set these repository secrets before enabling it:
 
 The workflow runs:
 
-- every 3 hours for price refresh batches
+- every 2 hours for hybrid card refresh batches
 - every Sunday at 3:00 UTC for a larger catalog discovery batch
 
 ## eBay Account Deletion Callback
@@ -144,11 +150,11 @@ eBay pricing is split intentionally:
 
 The eBay matcher is stricter than a raw keyword search. It filters out noisy listings such as lots, booster products, graded slabs, and proxy/custom items, and it requires title alignment with the card name plus set/number when available.
 
-TCGdex note:
+Rate-limit note:
 
-- TCGdex does not publish a clear hard request-per-minute limit in the official docs/site referenced by this app
-- the ingestion defaults here stay conservative on request fan-out (`TCGDEX_PAGE_SIZE=50`, `TCGDEX_DETAIL_BATCH_SIZE=10`)
-- the scheduler is increased to every 3 hours, but the per-run batch size remains moderate instead of guessing an undocumented ceiling
+- TCGdex does not publish a clear hard request-per-minute limit in the official docs/site referenced by this app, so the TCGdex fan-out remains conservative (`TCGDEX_PAGE_SIZE=50`, `TCGDEX_DETAIL_BATCH_SIZE=10`)
+- eBay Browse limits are app-dependent and not clearly published as a single stable public number, so the hybrid scheduler stays well below the commonly referenced 5,000-calls-per-day budget by refreshing watchlist cards every run and rotating the rest of the catalog
+- Vercel Hobby function limits are compatible with this batch size, so the schedule is increased to every 2 hours rather than attempting a full-universe refresh in one request
 
 ## CSV Export Utility
 

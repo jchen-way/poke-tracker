@@ -24,9 +24,9 @@ const EBAY_CLIENT_ID = process.env.EBAY_CLIENT_ID;
 const EBAY_CLIENT_SECRET = process.env.EBAY_CLIENT_SECRET;
 const EBAY_ENV = process.env.EBAY_ENV ?? 'production';
 const EBAY_MARKETPLACE_ID = process.env.EBAY_MARKETPLACE_ID ?? 'EBAY_US';
-const EBAY_ENRICHMENT_LIMIT = parsePositiveInt(
+const EBAY_ENRICHMENT_LIMIT = parseNonNegativeInt(
   process.env.EBAY_ENRICHMENT_LIMIT,
-  CARD_SYNC_LIMIT,
+  0,
 );
 const ETB_SYNC_LIMIT = parsePositiveInt(process.env.ETB_SYNC_LIMIT, 12);
 const ETB_CATALOG_SYNC_LIMIT = parsePositiveInt(process.env.ETB_CATALOG_SYNC_LIMIT, 120);
@@ -116,21 +116,9 @@ export async function syncPokemonMarketData(options: SyncOptions = {}) {
     await discoverTrackedCards(discoverLimit || limit);
   }
 
-  const refreshTargets = await prisma.trackedItem.findMany({
-    where: {
-      type: 'CARD',
-      cardId: {
-        not: null,
-      },
-    },
-    orderBy: [
-      { watchlistEntries: { _count: 'desc' } },
-      { priorityScore: 'desc' },
-      { lastPriceCheckAt: { sort: 'asc', nulls: 'first' } },
-      { updatedAt: 'asc' },
-    ],
-    take: limit,
-  });
+  const refreshTargets = await fetchCardRefreshTargets(limit);
+  const ebayEnrichmentLimit =
+    EBAY_ENRICHMENT_LIMIT > 0 ? EBAY_ENRICHMENT_LIMIT : refreshTargets.length;
 
   const cards = await fetchTcgdexCardsByIds(
     refreshTargets
@@ -163,7 +151,7 @@ export async function syncPokemonMarketData(options: SyncOptions = {}) {
     const tcgplayerPrice = extractTcgplayerPrice(card);
     const cardmarketPrice = extractCardmarketPrice(card);
     const ebayMarket =
-      hasEbayCredentials() && index < EBAY_ENRICHMENT_LIMIT
+      hasEbayCredentials() && index < ebayEnrichmentLimit
         ? await fetchEbayMarketSnapshot({
             query: buildEbaySearchQuery({
               name: card.name,
@@ -781,6 +769,57 @@ function parsePositiveInt(value: string | undefined, fallback: number): number {
   }
 
   return parsed;
+}
+
+function parseNonNegativeInt(value: string | undefined, fallback: number): number {
+  const parsed = Number.parseInt(value ?? '', 10);
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    return fallback;
+  }
+
+  return parsed;
+}
+
+async function fetchCardRefreshTargets(backgroundLimit: number) {
+  const watchlistTargets = await prisma.trackedItem.findMany({
+    where: {
+      type: 'CARD',
+      cardId: {
+        not: null,
+      },
+      watchlistEntries: {
+        some: {},
+      },
+    },
+    orderBy: getCardRefreshOrder(),
+  });
+
+  const backgroundTargets = await prisma.trackedItem.findMany({
+    where: {
+      type: 'CARD',
+      cardId: {
+        not: null,
+      },
+      id: watchlistTargets.length
+        ? {
+            notIn: watchlistTargets.map((item) => item.id),
+          }
+        : undefined,
+    },
+    orderBy: getCardRefreshOrder(),
+    take: backgroundLimit,
+  });
+
+  return [...watchlistTargets, ...backgroundTargets];
+}
+
+function getCardRefreshOrder() {
+  return [
+    { watchlistEntries: { _count: 'desc' as const } },
+    { priorityScore: 'desc' as const },
+    { lastPriceCheckAt: { sort: 'asc' as const, nulls: 'first' as const } },
+    { updatedAt: 'asc' as const },
+  ];
 }
 
 async function fetchEbayMarketSnapshot({

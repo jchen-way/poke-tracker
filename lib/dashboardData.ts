@@ -12,7 +12,33 @@ export async function fetchDashboardSnapshots() {
     12000,
   );
 
-  const snapshots = await prisma.priceSnapshot.findMany({
+  const latestSnapshots = await prisma.priceSnapshot.findMany({
+    where: {
+      item: {
+        type: 'CARD',
+        cardId: {
+          not: null,
+        },
+      },
+    },
+    include: {
+      item: {
+        select: {
+          name: true,
+          setName: true,
+          number: true,
+          cardId: true,
+        },
+      },
+    },
+    orderBy: [
+      { trackedItemId: 'asc' },
+      { date: 'desc' },
+    ],
+    distinct: ['trackedItemId'],
+  });
+
+  const recentSnapshots = await prisma.priceSnapshot.findMany({
     where: {
       item: {
         type: 'CARD',
@@ -35,5 +61,11 @@ export async function fetchDashboardSnapshots() {
     take: snapshotTake,
   });
 
-  return snapshots as DashboardSnapshot[];
+  const seenSnapshotIds = new Set(latestSnapshots.map((snapshot) => snapshot.id));
+  const combinedSnapshots = [
+    ...latestSnapshots,
+    ...recentSnapshots.filter((snapshot) => !seenSnapshotIds.has(snapshot.id)),
+  ];
+
+  return combinedSnapshots as DashboardSnapshot[];
 }

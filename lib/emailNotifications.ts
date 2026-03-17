@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import prisma from './prisma';
 import {
   buildSignals,
@@ -32,6 +33,10 @@ type NotificationRecipient = {
       type: string;
     };
   }>;
+};
+
+type ReservedSignal = Signal & {
+  trackedItemId: string;
 };
 
 export async function sendNewSignalEmails(): Promise<NotificationSummary> {
@@ -110,27 +115,35 @@ export async function sendNewSignalEmails(): Promise<NotificationSummary> {
       continue;
     }
 
-    const unseenSignals = await getUnseenSignals(recipient.id, userSignals, snapshots);
-    if (!unseenSignals.length) {
+    const reservationToken = randomUUID();
+    const reservedSignals = await reserveSignals(recipient.id, userSignals, snapshots, reservationToken);
+    if (!reservedSignals.length) {
       usersSkipped += 1;
       continue;
     }
 
-    await sendSignalEmail(recipient, unseenSignals);
-    await prisma.notificationDelivery.createMany({
-      data: unseenSignals.map((signal) => ({
-        userId: recipient.id,
-        trackedItemId: getTrackedItemIdForSignal(signal, snapshots),
-        signalKey: signal.id,
-        signalLabel: signal.label,
-        signalTitle: signal.title,
-        signalValue: signal.value,
-      })),
-      skipDuplicates: true,
-    });
+    try {
+      await sendSignalEmail(recipient, reservedSignals);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unknown email failure';
+      await markReservationFailed(recipient.id, reservationToken, message);
+      usersSkipped += 1;
+      continue;
+    }
+
+    try {
+      await markReservationSent(recipient.id, reservationToken);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unknown delivery update failure';
+      console.error('[Email Notifications] failed to mark reservation sent', {
+        recipientId: recipient.id,
+        reservationToken,
+        error: message,
+      });
+    }
 
     emailsSent += 1;
-    signalsSent += unseenSignals.length;
+    signalsSent += reservedSignals.length;
   }
 
   return {
@@ -142,28 +155,50 @@ export async function sendNewSignalEmails(): Promise<NotificationSummary> {
   };
 }
 
-async function getUnseenSignals(
+async function reserveSignals(
   userId: string,
   signals: Signal[],
   snapshots: DashboardSnapshot[],
+  reservationToken: string,
 ) {
-  const deliveries = await prisma.notificationDelivery.findMany({
+  const reservableSignals = signals
+    .map((signal) => {
+      const trackedItemId = getTrackedItemIdForSignal(signal, snapshots);
+      return trackedItemId ? { ...signal, trackedItemId } : null;
+    })
+    .filter((signal): signal is ReservedSignal => Boolean(signal));
+
+  if (!reservableSignals.length) {
+    return [];
+  }
+
+  await prisma.notificationDelivery.createMany({
+    data: reservableSignals.map((signal) => ({
+      userId,
+      trackedItemId: signal.trackedItemId,
+      signalKey: signal.id,
+      signalLabel: signal.label,
+      signalTitle: signal.title,
+      signalValue: signal.value,
+      reservationToken,
+      status: 'RESERVED',
+    })),
+    skipDuplicates: true,
+  });
+
+  const reservedDeliveries = await prisma.notificationDelivery.findMany({
     where: {
       userId,
-      signalKey: {
-        in: signals.map((signal) => signal.id),
-      },
+      reservationToken,
+      status: 'RESERVED',
     },
     select: {
       signalKey: true,
     },
   });
 
-  const seenKeys = new Set(deliveries.map((delivery) => delivery.signalKey));
-
-  return signals
-    .filter((signal) => !seenKeys.has(signal.id))
-    .filter((signal) => getTrackedItemIdForSignal(signal, snapshots) != null);
+  const reservedKeys = new Set(reservedDeliveries.map((delivery) => delivery.signalKey));
+  return reservableSignals.filter((signal) => reservedKeys.has(signal.id));
 }
 
 async function sendSignalEmail(recipient: NotificationRecipient, signals: Signal[]) {
@@ -248,6 +283,34 @@ function buildEmailText(recipient: NotificationRecipient, signals: Signal[]) {
     .join('\n\n');
 
   return `${intro}\n${body}\n\nManage notification preferences: ${APP_BASE_URL}/settings`;
+}
+
+async function markReservationSent(userId: string, reservationToken: string) {
+  await prisma.notificationDelivery.updateMany({
+    where: {
+      userId,
+      reservationToken,
+      status: 'RESERVED',
+    },
+    data: {
+      status: 'SENT',
+      sentAt: new Date(),
+    },
+  });
+}
+
+async function markReservationFailed(userId: string, reservationToken: string, failureReason: string) {
+  await prisma.notificationDelivery.updateMany({
+    where: {
+      userId,
+      reservationToken,
+      status: 'RESERVED',
+    },
+    data: {
+      status: 'FAILED',
+      failureReason,
+    },
+  });
 }
 
 function getTrackedItemIdForSignal(signal: Signal, snapshots: DashboardSnapshot[]) {

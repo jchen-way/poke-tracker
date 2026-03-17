@@ -106,6 +106,17 @@ function parseSessionValue(value: string): SessionPayload | null {
   }
 }
 
+function buildSessionFallbackUser(session: SessionPayload): CurrentUser {
+  return {
+    id: session.userId,
+    email: session.email,
+    displayName: null,
+    emailNotificationsEnabled: true,
+    authProvider: 'credentials',
+    createdAt: new Date(0),
+  };
+}
+
 function isTransientDatabaseError(error: unknown) {
   if (!(error instanceof Error)) {
     return false;
@@ -175,6 +186,24 @@ export async function getSession() {
   return parseSessionValue(sessionValue);
 }
 
+async function getCurrentUserFromDatabase(session: SessionPayload) {
+  return withDatabaseRetry(
+    () =>
+      prisma.user.findUnique({
+        where: { id: session.userId },
+        select: {
+          id: true,
+          email: true,
+          displayName: true,
+          emailNotificationsEnabled: true,
+          authProvider: true,
+          createdAt: true,
+        },
+      }),
+    'getCurrentUserFromDatabase',
+  );
+}
+
 export async function getCurrentUser() {
   const session = await getSession();
   if (!session) {
@@ -182,43 +211,45 @@ export async function getCurrentUser() {
   }
 
   try {
-    return await withDatabaseRetry(
-      () =>
-        prisma.user.findUnique({
-          where: { id: session.userId },
-          select: {
-            id: true,
-            email: true,
-            displayName: true,
-            emailNotificationsEnabled: true,
-            authProvider: true,
-            createdAt: true,
-          },
-        }),
-      'getCurrentUser',
-    );
+    const user = await getCurrentUserFromDatabase(session);
+    if (user) {
+      return user;
+    }
   } catch (error) {
     if (!isTransientDatabaseError(error)) {
       throw error;
     }
 
     console.warn('[Auth] database unavailable during getCurrentUser, using session fallback');
+  }
 
-    const fallbackUser: CurrentUser = {
-      id: session.userId,
-      email: session.email,
-      displayName: null,
-      emailNotificationsEnabled: true,
-      authProvider: 'credentials',
-      createdAt: new Date(0),
-    };
+  return buildSessionFallbackUser(session);
+}
 
-    return fallbackUser;
+export async function getCurrentUserForShell() {
+  return getCurrentUser();
+}
+
+export async function getCurrentUserStrict() {
+  const session = await getSession();
+  if (!session) {
+    return null;
+  }
+
+  try {
+    return await getCurrentUserFromDatabase(session);
+  } catch (error) {
+    if (!isTransientDatabaseError(error)) {
+      throw error;
+    }
+
+    console.warn('[Auth] database unavailable during getCurrentUserStrict');
+    return null;
   }
 }
 
 export async function requireUser(redirectTo = '/login') {
-  const user = await getCurrentUser();
+  const user = await getCurrentUserStrict();
   if (!user) {
     redirect(redirectTo);
   }

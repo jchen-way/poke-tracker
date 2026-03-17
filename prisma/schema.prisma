@@ -126,11 +126,16 @@ model NotificationDelivery {
   signalLabel   String
   signalTitle   String
   signalValue   String
+  reservationToken String?
+  status        String   @default("RESERVED")
+  sentAt        DateTime?
+  failureReason String?
   createdAt     DateTime @default(now())
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([userId, signalKey])
+  @@index([reservationToken])
   @@index([userId, createdAt])
   @@index([trackedItemId, createdAt])
 }

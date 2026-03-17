@@ -1,10 +1,10 @@
 import Link from 'next/link';
 import { Gamepad2, UserCircle } from 'lucide-react';
-import { getCurrentUser } from '../../lib/auth';
+import { getCurrentUserForShell } from '../../lib/auth';
 import { logoutAction } from '../login/actions';
 
 export default async function Navbar() {
-  const user = await getCurrentUser();
+  const user = await getCurrentUserForShell();
 
   return (
     <nav className="navbar fade-in">

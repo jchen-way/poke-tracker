@@ -509,6 +509,8 @@ async function syncEtbCatalog(limit: number) {
     return;
   }
 
+  const candidateTrackedIds = candidates.map((candidate) => candidate.trackedId);
+
   for (const candidate of candidates) {
     await prisma.etbCatalogEntry.upsert({
       where: { trackedId: candidate.trackedId },
@@ -528,7 +530,7 @@ async function syncEtbCatalog(limit: number) {
 
   const targets = await prisma.etbCatalogEntry.findMany({
     where: {
-      trackedId: { in: candidates.map((candidate) => candidate.trackedId) },
+      trackedId: { in: candidateTrackedIds },
     },
     orderBy: [
       { isValidated: 'asc' },
@@ -558,6 +560,24 @@ async function syncEtbCatalog(limit: number) {
       },
     });
   }
+
+  await prisma.etbCatalogEntry.updateMany({
+    where: {
+      isValidated: true,
+      trackedId: {
+        notIn: candidateTrackedIds,
+      },
+    },
+    data: {
+      isValidated: false,
+      imageUrl: null,
+      ebayMedianPrice: null,
+      ebayLowPrice: null,
+      ebaySampleSize: null,
+      ebayListingUrl: null,
+      lastValidatedAt: new Date(),
+    },
+  });
 }
 
 export async function refreshTrackedEtb(trackedItemId: string) {
@@ -634,9 +654,10 @@ function hasTrustedEtbMarketPreview(preview: EbayMarketSnapshot | null) {
   }
 
   return (
-    preview.sampleSize >= 2 &&
-    (preview.medianPrice ?? 0) >= 20 &&
-    (preview.lowPrice ?? 0) >= 15
+    preview.sampleSize >= 3 &&
+    (preview.medianPrice ?? 0) >= 25 &&
+    (preview.lowPrice ?? 0) >= 20 &&
+    (preview.lowPrice ?? 0) >= (preview.medianPrice ?? 0) * 0.55
   );
 }
 
@@ -1068,12 +1089,8 @@ function isRelevantEbayEtbListing(title: string, context: EbayEtbSearchContext) 
   ];
 
   const hasPositiveSignal = positiveSignals.some((term) => normalizedTitle.includes(term));
-  const hasExplicitEtbBox =
-    normalizedTitle.includes('elite trainer box') &&
-    !normalizedTitle.includes('card sleeves') &&
-    !normalizedTitle.includes('deck box');
 
-  if (!hasPositiveSignal && !hasExplicitEtbBox) {
+  if (!hasPositiveSignal) {
     return false;
   }
 
@@ -1089,7 +1106,7 @@ function isRelevantEbayEtbListing(title: string, context: EbayEtbSearchContext) 
   }
 
   const matchedTokenCount = setTokens.filter((token) => normalizedTitle.includes(token)).length;
-  const requiredMatches = Math.min(1, setTokens.length);
+  const requiredMatches = setTokens.length >= 2 ? 2 : 1;
   return matchedTokenCount >= requiredMatches;
 }
 

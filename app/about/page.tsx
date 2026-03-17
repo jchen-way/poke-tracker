@@ -1,3 +1,4 @@
+import type { Metadata } from 'next';
 import Link from 'next/link';
 import {
   ArrowRight,
@@ -11,6 +12,21 @@ import {
 import { getCurrentUser } from '../../lib/auth';
 import CursorAura from '../components/CursorAura';
 import PointerTilt from '../components/PointerTilt';
+
+export const metadata: Metadata = {
+  title: 'About',
+  description:
+    'Learn how PokeTracker helps Pokemon TCG collectors and deal hunters track cards, ETBs, watchlists, and pricing signals faster.',
+  alternates: {
+    canonical: '/about',
+  },
+  openGraph: {
+    title: 'About PokeTracker',
+    description:
+      'Learn how PokeTracker helps Pokemon TCG collectors and deal hunters track cards, ETBs, watchlists, and pricing signals faster.',
+    url: '/about',
+  },
+};
 
 const proofHighlights = [
   { title: 'Watchlists first', label: 'Priority items stay in front of the queue.' },

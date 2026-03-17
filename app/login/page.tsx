@@ -1,8 +1,18 @@
+import type { Metadata } from 'next';
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { Gamepad2 } from 'lucide-react';
 import { getCurrentUser } from '../../lib/auth';
 import { loginAction } from './actions';
+
+export const metadata: Metadata = {
+  title: 'Sign In',
+  description: 'Sign in to PokeTracker to access your Pokemon TCG dashboard, watchlist, and alerts.',
+  robots: {
+    index: false,
+    follow: false,
+  },
+};
 
 type SearchParams = {
   error?: string;

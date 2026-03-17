@@ -541,10 +541,19 @@ async function syncEtbCatalog(limit: number) {
   });
 
   for (const target of targets) {
-    const preview = await fetchEtbMarketPreview({
-      name: target.name,
-      setName: target.setName,
-    });
+    const preview = hasEbayCredentials()
+      ? await fetchEbayMarketSnapshot({
+          query: buildEbayEtbSearchQuery({
+            name: target.name,
+            setName: target.setName,
+          }),
+          isRelevantMatch: (title) =>
+            isRelevantEbayEtbListing(title, {
+              name: target.name,
+              setName: target.setName,
+            }),
+        })
+      : null;
     const trusted = hasTrustedEtbMarketPreview(preview);
 
     await prisma.etbCatalogEntry.update({
@@ -659,30 +668,6 @@ function hasTrustedEtbMarketPreview(preview: EbayMarketSnapshot | null) {
     (preview.lowPrice ?? 0) >= 20 &&
     (preview.lowPrice ?? 0) >= (preview.medianPrice ?? 0) * 0.55
   );
-}
-
-export async function fetchEtbMarketPreview({
-  name,
-  setName,
-}: {
-  name: string;
-  setName: string | null;
-}) {
-  if (!hasEbayCredentials()) {
-    return null;
-  }
-
-  return fetchEbayMarketSnapshot({
-    query: buildEbayEtbSearchQuery({
-      name,
-      setName,
-    }),
-    isRelevantMatch: (title) =>
-      isRelevantEbayEtbListing(title, {
-        name,
-        setName,
-      }),
-  });
 }
 
 async function fetchTcgdexCard(cardId: string): Promise<TcgdexCard> {

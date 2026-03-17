@@ -1,8 +1,24 @@
+import type { Metadata } from 'next';
 import Link from 'next/link';
 import Image from 'next/image';
 import { Leaf, Droplets, Flame, ArrowRight, Zap } from 'lucide-react';
 import CursorAura from './components/CursorAura';
 import PointerTilt from './components/PointerTilt';
+
+export const metadata: Metadata = {
+  title: 'Pokemon TCG Market Tracker',
+  description:
+    'Track Pokemon card and ETB prices, follow watchlist signals, and review eBay-backed market opportunities in one dashboard.',
+  alternates: {
+    canonical: '/',
+  },
+  openGraph: {
+    title: 'PokeTracker | Pokemon TCG Market Tracker',
+    description:
+      'Track Pokemon card and ETB prices, follow watchlist signals, and review eBay-backed market opportunities in one dashboard.',
+    url: '/',
+  },
+};
 
 export default function LandingPage() {
   return (
@@ -14,8 +30,8 @@ export default function LandingPage() {
             <h1 className="pixel-text">Catch Market Trends.</h1>
             <p className="hero-subtitle text-muted">A calming, real-time tracking dashboard for your collection. Never miss a price dip, never miss a spike. Find your peace in the market.</p>
             <div className="hero-actions">
-              <Link href="/dashboard" className="btn-retro blue">
-                Start Tracking <ArrowRight size={18}/>
+              <Link href="/register" className="btn-retro blue">
+                Get Started <ArrowRight size={18}/>
               </Link>
               <Link href="/about" className="btn-retro clear pixel-text">
                 Learn More

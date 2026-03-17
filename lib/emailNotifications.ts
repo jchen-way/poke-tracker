@@ -172,19 +172,67 @@ async function reserveSignals(
     return [];
   }
 
-  await prisma.notificationDelivery.createMany({
-    data: reservableSignals.map((signal) => ({
+  const existingDeliveries = await prisma.notificationDelivery.findMany({
+    where: {
       userId,
-      trackedItemId: signal.trackedItemId,
-      signalKey: signal.id,
-      signalLabel: signal.label,
-      signalTitle: signal.title,
-      signalValue: signal.value,
-      reservationToken,
-      status: 'RESERVED',
-    })),
-    skipDuplicates: true,
+      signalKey: {
+        in: reservableSignals.map((signal) => signal.id),
+      },
+    },
+    select: {
+      signalKey: true,
+      status: true,
+    },
   });
+
+  const existingStatusByKey = new Map(
+    existingDeliveries.map((delivery) => [delivery.signalKey, delivery.status]),
+  );
+
+  const freshSignals = reservableSignals.filter((signal) => !existingStatusByKey.has(signal.id));
+  const retryableSignals = reservableSignals.filter(
+    (signal) => existingStatusByKey.get(signal.id) === 'FAILED',
+  );
+
+  if (freshSignals.length) {
+    await prisma.notificationDelivery.createMany({
+      data: freshSignals.map((signal) => ({
+        userId,
+        trackedItemId: signal.trackedItemId,
+        signalKey: signal.id,
+        signalLabel: signal.label,
+        signalTitle: signal.title,
+        signalValue: signal.value,
+        reservationToken,
+        status: 'RESERVED',
+      })),
+      skipDuplicates: true,
+    });
+  }
+
+  if (retryableSignals.length) {
+    await prisma.$transaction(
+      retryableSignals.map((signal) =>
+        prisma.notificationDelivery.updateMany({
+          where: {
+            userId,
+            signalKey: signal.id,
+            status: 'FAILED',
+          },
+          data: {
+            trackedItemId: signal.trackedItemId,
+            signalLabel: signal.label,
+            signalTitle: signal.title,
+            signalValue: signal.value,
+            reservationToken,
+            status: 'RESERVED',
+            sentAt: null,
+            failureReason: null,
+          },
+        }),
+      ),
+    );
+  }
 
   const reservedDeliveries = await prisma.notificationDelivery.findMany({
     where: {

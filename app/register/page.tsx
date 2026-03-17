@@ -1,8 +1,18 @@
+import type { Metadata } from 'next';
 import Link from 'next/link';
 import { Gamepad2 } from 'lucide-react';
 import { getCurrentUser } from '../../lib/auth';
 import { registerAction } from '../login/actions';
 import { redirect } from 'next/navigation';
+
+export const metadata: Metadata = {
+  title: 'Create Account',
+  description: 'Create a PokeTracker account to save your Pokemon TCG watchlist, alerts, and collection activity.',
+  robots: {
+    index: false,
+    follow: false,
+  },
+};
 
 type SearchParams = {
   error?: string;

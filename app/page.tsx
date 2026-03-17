@@ -56,7 +56,7 @@ export default function LandingPage() {
         <div className="features-grid">
           <div className="feature-card retro-panel">
             <div className="icon-wrap blue"><Droplets size={28}/></div>
-            <h3 className="pixel-text">Arbritrage Detection</h3>
+            <h3 className="pixel-text">Arbitrage Detection</h3>
             <p className="text-muted">Instantly find price gaps across TCGPlayer, eBay, and more. Flow seamlessly into profitable trades.</p>
           </div>
           

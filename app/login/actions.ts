@@ -1,8 +1,9 @@
 'use server';
 
+import { Prisma } from '@prisma/client';
 import { redirect } from 'next/navigation';
 import prisma from '../../lib/prisma';
-import { createSession, hashPassword, verifyPassword, clearSession } from '../../lib/auth';
+import { createSession, hashPassword, verifyPassword, clearSession, withDatabaseRetry } from '../../lib/auth';
 
 function getString(formData: FormData, key: string) {
   return String(formData.get(key) ?? '').trim();
@@ -20,7 +21,10 @@ export async function loginAction(formData: FormData) {
     redirect('/login?error=missing');
   }
 
-  const user = await prisma.user.findUnique({ where: { email } });
+  const user = await withDatabaseRetry(
+    () => prisma.user.findUnique({ where: { email } }),
+    'loginAction.findUserByEmail',
+  );
   if (user?.authProvider === 'google' && !user.password) {
     redirect('/login?error=google');
   }
@@ -49,17 +53,28 @@ export async function registerAction(formData: FormData) {
     redirect('/register?error=match');
   }
 
-  const existingUser = await prisma.user.findUnique({ where: { email } });
+  const existingUser = await withDatabaseRetry(
+    () => prisma.user.findUnique({ where: { email } }),
+    'registerAction.findUserByEmail',
+  );
   if (existingUser) {
     redirect('/register?error=exists');
   }
 
-  const user = await prisma.user.create({
-    data: {
-      email,
-      password: hashPassword(password),
-    },
-  });
+  let user;
+  try {
+    user = await prisma.user.create({
+      data: {
+        email,
+        password: hashPassword(password),
+      },
+    });
+  } catch (error) {
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+      redirect('/register?error=exists');
+    }
+    throw error;
+  }
 
   await createSession(user.id, user.email);
   redirect('/dashboard');

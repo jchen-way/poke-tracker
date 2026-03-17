@@ -3,7 +3,7 @@
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import prisma from '../../lib/prisma';
-import { hashPassword, requireUser, verifyPassword } from '../../lib/auth';
+import { hashPassword, requireUser, verifyPassword, withDatabaseRetry } from '../../lib/auth';
 
 function getString(formData: FormData, key: string) {
   return String(formData.get(key) ?? '').trim();
@@ -40,14 +40,18 @@ export async function updatePasswordAction(formData: FormData) {
     redirect('/settings?error=match');
   }
 
-  const fullUser = await prisma.user.findUnique({
-    where: { id: user.id },
-    select: {
-      id: true,
-      password: true,
-      authProvider: true,
-    },
-  });
+  const fullUser = await withDatabaseRetry(
+    () =>
+      prisma.user.findUnique({
+        where: { id: user.id },
+        select: {
+          id: true,
+          password: true,
+          authProvider: true,
+        },
+      }),
+    'updatePasswordAction.findCurrentUser',
+  );
 
   if (!fullUser) {
     redirect('/login');

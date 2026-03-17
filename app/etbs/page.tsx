@@ -69,7 +69,11 @@ export default async function EtbsPage({
     }),
   ]);
 
-  const trackedByCardId = new Map(trackedEtbs.map((item) => [item.cardId ?? '', item]));
+  const trackedByCardId = new Map(
+    trackedEtbs
+      .filter((item): item is typeof item & { cardId: string } => Boolean(item.cardId))
+      .map((item) => [item.cardId, item]),
+  );
   const watchlistIds = new Set(watchlistItems.map((entry) => entry.trackedItemId));
 
   const allEtbs = knownCatalog

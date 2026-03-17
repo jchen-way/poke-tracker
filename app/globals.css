@@ -241,12 +241,6 @@ p {
 }
 
 /* Layout Utilities */
-.app-container {
-  display: flex;
-  flex-direction: column;
-  min-height: 100vh;
-}
-
 main.content-area {
   flex: 1;
 }

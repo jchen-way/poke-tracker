@@ -1,4 +1,5 @@
 import type { Metadata } from 'next';
+import { Analytics } from '@vercel/analytics/next';
 import './globals.css';
 
 const siteUrl = process.env.APP_BASE_URL?.trim() || 'https://poketracker.dev';
@@ -33,6 +34,7 @@ export default async function RootLayout({
         <main className="content-area">
           {children}
         </main>
+        <Analytics />
       </body>
     </html>
   );

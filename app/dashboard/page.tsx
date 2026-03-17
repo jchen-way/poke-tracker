@@ -126,10 +126,15 @@ export default async function Home({
           <Link href={activeItem?.type === 'ETB' ? '/etbs' : '/collections'} className="btn-retro blue">
             {activeItem?.type === 'ETB' ? 'View ETBs' : 'View Collection'}
           </Link>
-          <button className="btn-icon hover-scale" aria-label="Notifications" id="btn-notifications">
+          <Link
+            href="/settings"
+            className="btn-icon hover-scale"
+            aria-label="Account settings and email notifications"
+            id="btn-notifications"
+          >
             <BellRing size={20} />
             {metricSummary.discrepancies > 0 ? <span className="badge-pulse"></span> : null}
-          </button>
+          </Link>
         </div>
       </header>
 

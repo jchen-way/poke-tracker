@@ -1,3 +1,4 @@
+import { Prisma } from '@prisma/client';
 import { NextResponse } from 'next/server';
 import prisma from '../../../../../lib/prisma';
 import {
@@ -6,6 +7,7 @@ import {
   getGoogleStateCookieName,
   getSessionCookieName,
   getSessionCookieOptions,
+  withDatabaseRetry,
 } from '../../../../../lib/auth';
 import { exchangeGoogleCode, fetchGoogleUserInfo, hasGoogleOauthCredentials } from '../../../../../lib/googleAuth';
 
@@ -31,41 +33,76 @@ export async function GET(request: Request) {
     const profile = await fetchGoogleUserInfo(accessToken);
     const email = profile.email.toLowerCase();
 
-    const existingByGoogle = await prisma.user.findUnique({
-      where: { googleId: profile.sub },
-    });
+    const existingByGoogle = await withDatabaseRetry(
+      () =>
+        prisma.user.findUnique({
+          where: { googleId: profile.sub },
+        }),
+      'googleCallback.findUserByGoogleId',
+    );
     const existingByEmail =
       existingByGoogle ??
-      (await prisma.user.findUnique({
-        where: { email },
-        select: {
-          id: true,
-          email: true,
-          password: true,
-          authProvider: true,
-        },
-      }));
+      (await withDatabaseRetry(
+        () =>
+          prisma.user.findUnique({
+            where: { email },
+            select: {
+              id: true,
+              email: true,
+              password: true,
+              authProvider: true,
+            },
+          }),
+        'googleCallback.findUserByEmail',
+      ));
 
-    const user = existingByEmail
-      ? await prisma.user.update({
-          where: { id: existingByEmail.id },
-          data: {
-            googleId: profile.sub,
-            authProvider:
-              existingByEmail.password && existingByEmail.authProvider !== 'google+credentials'
-                ? 'google+credentials'
-                : existingByEmail.authProvider || 'google',
-            displayName: profile.name ?? undefined,
-          },
-        })
-      : await prisma.user.create({
-          data: {
-            email,
-            googleId: profile.sub,
-            authProvider: 'google',
-            displayName: profile.name ?? null,
-          },
-        });
+    let user;
+    try {
+      user = existingByEmail
+        ? await prisma.user.update({
+            where: { id: existingByEmail.id },
+            data: {
+              googleId: profile.sub,
+              authProvider:
+                existingByEmail.password && existingByEmail.authProvider !== 'google+credentials'
+                  ? 'google+credentials'
+                  : existingByEmail.authProvider || 'google',
+              displayName: profile.name ?? undefined,
+            },
+          })
+        : await prisma.user.create({
+            data: {
+              email,
+              googleId: profile.sub,
+              authProvider: 'google',
+              displayName: profile.name ?? null,
+            },
+          });
+    } catch (error) {
+      if (!(error instanceof Prisma.PrismaClientKnownRequestError) || error.code !== 'P2002') {
+        throw error;
+      }
+
+      user =
+        (await withDatabaseRetry(
+          () =>
+            prisma.user.findUnique({
+              where: { googleId: profile.sub },
+            }),
+          'googleCallback.recoverUserByGoogleId',
+        )) ??
+        (await withDatabaseRetry(
+          () =>
+            prisma.user.findUnique({
+              where: { email },
+            }),
+          'googleCallback.recoverUserByEmail',
+        ));
+
+      if (!user) {
+        throw error;
+      }
+    }
 
     const response = NextResponse.redirect(new URL('/dashboard', request.url));
     response.cookies.set(

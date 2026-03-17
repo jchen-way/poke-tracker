@@ -2,8 +2,16 @@ import { NextResponse } from 'next/server';
 import prisma from '../../../../lib/prisma';
 import { normalizeCardImageUrl } from '../../../../lib/cardImages';
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
+    const cronSecret = process.env.CRON_SECRET;
+    if (cronSecret) {
+      const requestSecret = request.headers.get('x-cron-secret');
+      if (requestSecret !== cronSecret) {
+        return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 });
+      }
+    }
+
     const items = await prisma.trackedItem.findMany({
       where: {
         imageUrl: {

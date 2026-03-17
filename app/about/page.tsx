@@ -76,8 +76,8 @@ export default async function AboutPage() {
                   Create Account
                   <ArrowRight size={18} />
                 </Link>
-                <Link id="about-open-dashboard" href="/dashboard" className="btn-retro clear pixel-text">
-                  Preview Dashboard
+                <Link id="about-login-hero" href="/login" className="btn-retro clear pixel-text">
+                  Sign In
                 </Link>
               </>
             )}
@@ -220,7 +220,7 @@ export default async function AboutPage() {
                   Get Started
                   <ArrowRight size={18} />
                 </Link>
-                <Link id="about-login" href="/login" className="btn-retro clear pixel-text">
+                <Link id="about-login-footer" href="/login" className="btn-retro clear pixel-text">
                   Log In
                 </Link>
               </>

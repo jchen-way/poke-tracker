@@ -14,6 +14,15 @@ type SessionPayload = {
   exp: number;
 };
 
+type CurrentUser = {
+  id: string;
+  email: string;
+  displayName: string | null;
+  emailNotificationsEnabled: boolean;
+  authProvider: string;
+  createdAt: Date;
+};
+
 function getAuthSecret() {
   const secret = process.env.AUTH_SECRET?.trim();
   if (secret) {
@@ -97,6 +106,50 @@ function parseSessionValue(value: string): SessionPayload | null {
   }
 }
 
+function isTransientDatabaseError(error: unknown) {
+  if (!(error instanceof Error)) {
+    return false;
+  }
+
+  const message = error.message.toLowerCase();
+  return (
+    error.name === 'PrismaClientInitializationError' ||
+    message.includes("can't reach database server") ||
+    message.includes('connection') ||
+    message.includes('timeout') ||
+    message.includes('timed out')
+  );
+}
+
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+export async function withDatabaseRetry<T>(
+  operation: () => Promise<T>,
+  label: string,
+  retries = 2,
+) {
+  let lastError: unknown;
+
+  for (let attempt = 0; attempt <= retries; attempt += 1) {
+    try {
+      return await operation();
+    } catch (error) {
+      lastError = error;
+      if (!isTransientDatabaseError(error) || attempt === retries) {
+        throw error;
+      }
+
+      const delayMs = 150 * (attempt + 1);
+      console.warn(`[Auth] transient database error during ${label}, retrying in ${delayMs}ms`);
+      await sleep(delayMs);
+    }
+  }
+
+  throw lastError;
+}
+
 export async function createSession(userId: string, email: string) {
   const expires = Date.now() + SESSION_TTL_MS;
   const value = createSessionCookieValue(userId, email, expires);
@@ -128,17 +181,40 @@ export async function getCurrentUser() {
     return null;
   }
 
-  return prisma.user.findUnique({
-    where: { id: session.userId },
-    select: {
-      id: true,
-      email: true,
-      displayName: true,
+  try {
+    return await withDatabaseRetry(
+      () =>
+        prisma.user.findUnique({
+          where: { id: session.userId },
+          select: {
+            id: true,
+            email: true,
+            displayName: true,
+            emailNotificationsEnabled: true,
+            authProvider: true,
+            createdAt: true,
+          },
+        }),
+      'getCurrentUser',
+    );
+  } catch (error) {
+    if (!isTransientDatabaseError(error)) {
+      throw error;
+    }
+
+    console.warn('[Auth] database unavailable during getCurrentUser, using session fallback');
+
+    const fallbackUser: CurrentUser = {
+      id: session.userId,
+      email: session.email,
+      displayName: null,
       emailNotificationsEnabled: true,
-      authProvider: true,
-      createdAt: true,
-    },
-  });
+      authProvider: 'credentials',
+      createdAt: new Date(0),
+    };
+
+    return fallbackUser;
+  }
 }
 
 export async function requireUser(redirectTo = '/login') {

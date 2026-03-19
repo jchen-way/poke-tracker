@@ -59,25 +59,33 @@ export async function GET(request: Request) {
     let user;
     try {
       user = existingByEmail
-        ? await prisma.user.update({
-            where: { id: existingByEmail.id },
-            data: {
-              googleId: profile.sub,
-              authProvider:
-                existingByEmail.password && existingByEmail.authProvider !== 'google+credentials'
-                  ? 'google+credentials'
-                  : existingByEmail.authProvider || 'google',
-              displayName: profile.name ?? undefined,
-            },
-          })
-        : await prisma.user.create({
-            data: {
-              email,
-              googleId: profile.sub,
-              authProvider: 'google',
-              displayName: profile.name ?? null,
-            },
-          });
+        ? await withDatabaseRetry(
+            () =>
+              prisma.user.update({
+                where: { id: existingByEmail.id },
+                data: {
+                  googleId: profile.sub,
+                  authProvider:
+                    existingByEmail.password && existingByEmail.authProvider !== 'google+credentials'
+                      ? 'google+credentials'
+                      : existingByEmail.authProvider || 'google',
+                  displayName: profile.name ?? undefined,
+                },
+              }),
+            'googleCallback.updateUser',
+          )
+        : await withDatabaseRetry(
+            () =>
+              prisma.user.create({
+                data: {
+                  email,
+                  googleId: profile.sub,
+                  authProvider: 'google',
+                  displayName: profile.name ?? null,
+                },
+              }),
+            'googleCallback.createUser',
+          );
     } catch (error) {
       if (!(error instanceof Prisma.PrismaClientKnownRequestError) || error.code !== 'P2002') {
         throw error;

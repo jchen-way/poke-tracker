@@ -45,7 +45,7 @@ export default async function Home({
   const searchQuery = resolvedSearchParams?.q?.trim() ?? '';
   const requestedItemId = resolvedSearchParams?.itemId ?? null;
 
-  const [trackedItems, trackedItemCount, searchResults, requestedItem] = await Promise.all([
+  const [trackedItems, trackedItemCount, searchResults, requestedItem, trackedEtbCount] = await Promise.all([
     prisma.trackedItem.findMany({
       where: {
         type: 'CARD',
@@ -80,6 +80,11 @@ export default async function Home({
           },
         })
       : Promise.resolve(null),
+    prisma.trackedItem.count({
+      where: {
+        type: 'ETB',
+      },
+    }),
   ]);
 
   const dashboardSnapshots = await fetchDashboardSnapshots();
@@ -95,6 +100,7 @@ export default async function Home({
     searchResults.find((item) => item.cardId === activeCardId) ??
     trackedItems[0] ??
     searchResults[0];
+  const isEtbMode = activeItem?.type === 'ETB';
 
   const series = activeItem
     ? activeItem.type === 'ETB'
@@ -116,15 +122,15 @@ export default async function Home({
             PokeTracker <span className="text-gradient">Pro</span>
           </h1>
           <p className="subtitle">
-            {activeItem?.type === 'ETB'
+            {isEtbMode
               ? 'Viewing a tracked Elite Trainer Box inside the main dashboard.'
               : 'Live card pricing, recent moves, and collection coverage from your database.'}
           </p>
         </div>
 
         <div className="header-actions">
-          <Link href={activeItem?.type === 'ETB' ? '/etbs' : '/collections'} className="btn-retro blue">
-            {activeItem?.type === 'ETB' ? 'View ETBs' : 'View Collection'}
+          <Link href={isEtbMode ? '/etbs' : '/collections'} className="btn-retro blue">
+            {isEtbMode ? 'View ETBs' : 'View Collection'}
           </Link>
           <Link
             href="/settings"
@@ -210,10 +216,10 @@ export default async function Home({
                   <Link
                     key={range}
                     href={`/dashboard?${buildDashboardRangeParams({
-                      itemId: activeItem?.type === 'ETB' ? activeItem.id : null,
-                      cardId: activeItem?.type === 'CARD' ? activeCardId ?? null : null,
+                      itemId: isEtbMode ? activeItem?.id ?? null : null,
+                      cardId: !isEtbMode ? activeCardId ?? null : null,
                       range,
-                      q: searchQuery || (activeItem?.type === 'ETB' ? activeItem.name : ''),
+                      q: !isEtbMode ? searchQuery : '',
                     })}`}
                     className={`chip ${activeRange === range ? 'active' : ''}`}
                   >
@@ -224,19 +230,26 @@ export default async function Home({
             </div>
           </div>
 
-          <div className="search-row">
-            <CardSearch
-              range={activeRange}
-              initialQuery={searchQuery}
-              activeCardId={activeCardId ?? null}
-              items={trackedItems.map(mapSearchItem)}
-            />
-            <div className="tracked-summary text-muted">
-              {activeItem?.type === 'ETB' ? `${trackedItemCount} cards tracked now` : `${trackedItemCount} tracked now`}
+          {isEtbMode ? (
+            <div className="search-row">
+              <div className="dashboard-mode-note text-muted">
+                ETB charts use the same price view as cards. Use the ETB library to switch sealed products.
+              </div>
+              <div className="tracked-summary text-muted">{trackedEtbCount} ETBs tracked now</div>
             </div>
-          </div>
+          ) : (
+            <div className="search-row">
+              <CardSearch
+                range={activeRange}
+                initialQuery={searchQuery}
+                activeCardId={activeCardId ?? null}
+                items={trackedItems.map(mapSearchItem)}
+              />
+              <div className="tracked-summary text-muted">{trackedItemCount} tracked now</div>
+            </div>
+          )}
 
-          {searchQuery ? (
+          {!isEtbMode && searchQuery ? (
             <div className="search-results">
               {searchResults.length ? (
                 searchResults.map((item) => (

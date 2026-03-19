@@ -83,11 +83,6 @@
   transform: translateY(-2px);
 }
 
-.alert-card.hover-scale:hover {
-  border-color: rgba(248, 113, 113, 0.4);
-  box-shadow: 0 0 20px rgba(248, 113, 113, 0.1);
-}
-
 .metric-icon {
   background: rgba(255, 255, 255, 0.05);
   padding: 1rem;
@@ -213,6 +208,11 @@
   padding: 1rem 1.5rem 0.25rem 1.5rem;
   gap: 1rem;
   flex-wrap: wrap;
+}
+
+.dashboard-mode-note {
+  max-width: 42ch;
+  font-size: 0.95rem;
 }
 
 .card-selector-label {

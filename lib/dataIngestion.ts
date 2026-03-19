@@ -237,20 +237,26 @@ export async function getPriceSeriesForCard(cardId: string) {
     },
   });
 
-  return buildPriceSeries(snapshots);
+  return buildPriceSeries(snapshots, 'CARD');
 }
 
 export async function getPriceSeriesForTrackedItem(trackedItemId: string) {
-  const snapshots = await prisma.priceSnapshot.findMany({
-    where: {
-      trackedItemId,
-    },
-    orderBy: {
-      date: 'asc',
-    },
-  });
+  const [trackedItem, snapshots] = await Promise.all([
+    prisma.trackedItem.findUnique({
+      where: { id: trackedItemId },
+      select: { type: true },
+    }),
+    prisma.priceSnapshot.findMany({
+      where: {
+        trackedItemId,
+      },
+      orderBy: {
+        date: 'asc',
+      },
+    }),
+  ]);
 
-  return buildPriceSeries(snapshots);
+  return buildPriceSeries(snapshots, trackedItem?.type === 'ETB' ? 'ETB' : 'CARD');
 }
 
 function buildPriceSeries(
@@ -262,10 +268,30 @@ function buildPriceSeries(
     ebayLowPrice: number | null;
     volume: number | null;
   }>,
+  itemType: 'CARD' | 'ETB',
 ) {
   if (!snapshots.length) return [];
 
-  const closes = snapshots.map((snap) => chooseChartPrice(snap));
+  const pricedSnapshots = snapshots
+    .map((snap) => {
+      const priceEntry = chooseChartPriceWithSource(snap, itemType);
+      return priceEntry.price == null ? null : { snap, priceEntry };
+    })
+    .filter(
+      (
+        entry,
+      ): entry is {
+        snap: (typeof snapshots)[number];
+        priceEntry: { price: number; source: string };
+      } => Boolean(entry),
+    );
+
+  if (!pricedSnapshots.length) {
+    return [];
+  }
+
+  const closeEntries = pricedSnapshots.map((entry) => entry.priceEntry);
+  const closes = closeEntries.map((entry) => entry.price);
 
   const ema = (period: number) => {
     const k = 2 / (period + 1);
@@ -283,13 +309,14 @@ function buildPriceSeries(
   const ema20 = ema(20);
   const ema50 = ema(50);
 
-  return snapshots.map((snap, idx) => ({
-    date: snap.date.toISOString(),
+  return pricedSnapshots.map((entry, idx) => ({
+    date: entry.snap.date.toISOString(),
     price: closes[idx],
+    priceSource: closeEntries[idx].source,
     ema8: ema8[idx],
     ema20: ema20[idx],
     ema50: ema50[idx],
-    volume: snap.volume ?? undefined,
+    volume: entry.snap.volume ?? undefined,
   }));
 }
 
@@ -474,9 +501,12 @@ async function syncTrackedEtbs(limit: number) {
     return [];
   }
 
-  const trackedEtbs = await prisma.trackedItem.findMany({
+  const watchlistedEtbs = await prisma.trackedItem.findMany({
     where: {
       type: 'ETB',
+      watchlistEntries: {
+        some: {},
+      },
     },
     orderBy: [
       { watchlistEntries: { _count: 'desc' } },
@@ -484,8 +514,26 @@ async function syncTrackedEtbs(limit: number) {
       { lastPriceCheckAt: { sort: 'asc', nulls: 'first' } },
       { updatedAt: 'asc' },
     ],
-    take: limit,
   });
+  const remainingSlots = Math.max(limit - watchlistedEtbs.length, 0);
+  const backgroundEtbs =
+    remainingSlots > 0
+      ? await prisma.trackedItem.findMany({
+          where: {
+            type: 'ETB',
+            watchlistEntries: {
+              none: {},
+            },
+          },
+          orderBy: [
+            { priorityScore: 'desc' },
+            { lastPriceCheckAt: { sort: 'asc', nulls: 'first' } },
+            { updatedAt: 'asc' },
+          ],
+          take: remainingSlots,
+        })
+      : [];
+  const trackedEtbs = [...watchlistedEtbs, ...backgroundEtbs];
 
   const results = [];
 
@@ -506,6 +554,7 @@ async function syncEtbCatalog(limit: number) {
 
   const candidates = await deriveEtbCatalogCandidates();
   if (!candidates.length) {
+    console.warn('[Ingest] ETB catalog candidate refresh returned no candidates');
     return;
   }
 
@@ -1188,13 +1237,40 @@ function chooseChartPrice(snapshot: {
   ebayPrice: number | null;
   ebayLowPrice: number | null;
 }) {
-  return (
-    snapshot.tcgplayerPrice ??
-    snapshot.fairValue ??
-    snapshot.ebayPrice ??
-    snapshot.ebayLowPrice ??
-    0
-  );
+  return chooseChartPriceWithSource(snapshot, 'CARD').price;
+}
+
+function chooseChartPriceWithSource(snapshot: {
+  fairValue: number | null;
+  tcgplayerPrice: number | null;
+  ebayPrice: number | null;
+  ebayLowPrice: number | null;
+}, itemType: 'CARD' | 'ETB') {
+  if (snapshot.tcgplayerPrice != null) {
+    return { price: snapshot.tcgplayerPrice, source: 'TCGplayer' };
+  }
+
+  if (snapshot.fairValue != null) {
+    if (itemType === 'ETB' && snapshot.ebayPrice != null) {
+      return { price: snapshot.fairValue, source: 'eBay Median' };
+    }
+
+    if (itemType === 'ETB' && snapshot.ebayLowPrice != null) {
+      return { price: snapshot.fairValue, source: 'eBay Low' };
+    }
+
+    return { price: snapshot.fairValue, source: 'Fair Value' };
+  }
+
+  if (snapshot.ebayPrice != null) {
+    return { price: snapshot.ebayPrice, source: 'eBay Median' };
+  }
+
+  if (snapshot.ebayLowPrice != null) {
+    return { price: snapshot.ebayLowPrice, source: 'eBay Low' };
+  }
+
+  return { price: null, source: 'Unavailable' };
 }
 
 export function getDisplayPrice(snapshot: {

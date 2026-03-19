@@ -33,6 +33,11 @@ export type Signal = {
   tcgplayerUrl: string;
 };
 
+type RankedSignal = {
+  signal: Signal;
+  rankScore: number;
+};
+
 export const TREND_MIN_POINTS = 3;
 export const TREND_MIN_CARDS = 5;
 const TREND_MIN_PRICE = 5;
@@ -60,7 +65,7 @@ export function buildSignals(snapshots: DashboardSnapshot[], limit = 5): Signal[
   const signals = getLatestSnapshotsByCard(snapshots)
     .flatMap((snapshot) => {
       const title = `${snapshot.item.name} (${snapshot.item.setName})`;
-      const signals: Signal[] = [];
+      const rankedSignals: RankedSignal[] = [];
       const ebayUrl =
         snapshot.ebayLowListingUrl ??
         buildEbaySearchUrl({
@@ -77,16 +82,19 @@ export function buildSignals(snapshots: DashboardSnapshot[], limit = 5): Signal[
       if (hasBuyOpportunity(snapshot)) {
         const fairValue = snapshot.fairValue ?? 0;
         const ebayLow = snapshot.ebayLowPrice ?? 0;
-        signals.push({
-          id: `${snapshot.id}-buy`,
-          label: 'BUY SIGNAL',
-          tone: 'buy',
-          title,
-          reason: `Consensus ${formatMoney(fairValue)} vs matched eBay listing ${formatMoney(ebayLow)}.`,
-          value: formatMoney(fairValue - ebayLow),
-          cardId: snapshot.item.cardId ?? null,
-          ebayUrl,
-          tcgplayerUrl,
+        rankedSignals.push({
+          signal: {
+            id: `${snapshot.id}-buy`,
+            label: 'BUY SIGNAL',
+            tone: 'buy',
+            title,
+            reason: `Consensus ${formatMoney(fairValue)} vs matched eBay listing ${formatMoney(ebayLow)}.`,
+            value: formatMoney(fairValue - ebayLow),
+            cardId: snapshot.item.cardId ?? null,
+            ebayUrl,
+            tcgplayerUrl,
+          },
+          rankScore: ((fairValue - ebayLow) / Math.max(ebayLow, 1)) * 100,
         });
       }
 
@@ -94,22 +102,26 @@ export function buildSignals(snapshots: DashboardSnapshot[], limit = 5): Signal[
         const tcgPrice = snapshot.tcgplayerPrice ?? 0;
         const ebayLow = snapshot.ebayLowPrice ?? 0;
         const delta = ((tcgPrice - ebayLow) / Math.max(tcgPrice, ebayLow)) * 100;
-        signals.push({
-          id: `${snapshot.id}-arb`,
-          label: 'ARBITRAGE',
-          tone: 'arbitrage',
-          title,
-          reason: `TCGplayer ${formatMoney(tcgPrice)} vs matched eBay listing ${formatMoney(ebayLow)}.`,
-          value: formatPercent(delta),
-          cardId: snapshot.item.cardId ?? null,
-          ebayUrl,
-          tcgplayerUrl,
+        rankedSignals.push({
+          signal: {
+            id: `${snapshot.id}-arb`,
+            label: 'ARBITRAGE',
+            tone: 'arbitrage',
+            title,
+            reason: `TCGplayer ${formatMoney(tcgPrice)} vs matched eBay listing ${formatMoney(ebayLow)}.`,
+            value: formatPercent(delta),
+            cardId: snapshot.item.cardId ?? null,
+            ebayUrl,
+            tcgplayerUrl,
+          },
+          rankScore: delta,
         });
       }
 
-      return signals;
+      return rankedSignals;
     })
-    .sort((left, right) => parseSignalValue(right.value) - parseSignalValue(left.value));
+    .sort((left, right) => right.rankScore - left.rankScore)
+    .map(({ signal }) => signal);
 
   return limit > 0 ? signals.slice(0, limit) : signals;
 }
@@ -269,8 +281,4 @@ export function formatMoney(value: number) {
 export function formatPercent(value: number) {
   const prefix = value > 0 ? '+' : '';
   return `${prefix}${value.toFixed(1)}%`;
-}
-
-function parseSignalValue(value: string) {
-  return Number.parseFloat(value.replace(/[^0-9.-]/g, '')) || 0;
 }

@@ -14,13 +14,17 @@ export async function updateProfileAction(formData: FormData) {
   const displayName = getString(formData, 'displayName');
   const emailNotificationsEnabled = formData.get('emailNotificationsEnabled') === 'on';
 
-  await prisma.user.update({
-    where: { id: user.id },
-    data: {
-      displayName: displayName || null,
-      emailNotificationsEnabled,
-    },
-  });
+  await withDatabaseRetry(
+    () =>
+      prisma.user.update({
+        where: { id: user.id },
+        data: {
+          displayName: displayName || null,
+          emailNotificationsEnabled,
+        },
+      }),
+    'updateProfileAction.updateUser',
+  );
 
   revalidatePath('/', 'layout');
   redirect('/settings?saved=profile');
@@ -63,14 +67,18 @@ export async function updatePasswordAction(formData: FormData) {
     }
   }
 
-  await prisma.user.update({
-    where: { id: user.id },
-    data: {
-      password: hashPassword(newPassword),
-      authProvider:
-        fullUser.authProvider === 'credentials' ? fullUser.authProvider : 'google+credentials',
-    },
-  });
+  await withDatabaseRetry(
+    () =>
+      prisma.user.update({
+        where: { id: user.id },
+        data: {
+          password: hashPassword(newPassword),
+          authProvider:
+            fullUser.authProvider === 'credentials' ? fullUser.authProvider : 'google+credentials',
+        },
+      }),
+    'updatePasswordAction.updateUser',
+  );
 
   revalidatePath('/', 'layout');
   redirect('/settings?saved=password');

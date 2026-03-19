@@ -18,6 +18,7 @@ import type {
 interface PricePoint {
   date: string;
   price: number;
+  priceSource?: string;
   ema8?: number;
   ema20?: number;
   ema50?: number;
@@ -103,12 +104,21 @@ const CustomTooltip = ({
         <p style={{ margin: '0 0 8px 0', fontWeight: 'bold' }}>{formatTooltipLabel(label)}</p>
         {payload.map((entry, index: number) => {
           const item = entry as TooltipPayloadEntry;
+          const source =
+            item.dataKey === 'price' && item.payload && typeof item.payload === 'object'
+              ? (item.payload as PricePoint).priceSource
+              : null;
           return (
             <div
               key={index}
               style={{ color: item.color, fontSize: '0.9rem', marginBottom: '4px' }}
             >
               {item.name}: ${formatTooltipValue(item.value)}
+              {source ? (
+                <div style={{ color: 'var(--color-text-muted)', fontSize: '0.8rem', marginTop: '2px' }}>
+                  Source: {source}
+                </div>
+              ) : null}
             </div>
           );
         })}

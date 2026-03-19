@@ -110,7 +110,8 @@ export async function deriveEtbCatalogCandidates() {
     return dedupeByTrackedId(normalized).sort((left, right) =>
       left.name.localeCompare(right.name),
     );
-  } catch {
+  } catch (error) {
+    console.warn('[ETB Catalog] Failed to derive ETB candidates from TCGdex', error);
     return [];
   }
 }
@@ -174,17 +175,13 @@ function isLikelyEtbSet({
   setId: string;
   setName: string;
 }) {
-  const normalizedSetId = normalizeText(setId);
   const normalizedSetName = normalizeText(setName);
 
   if (ETB_EXCLUDED_TERMS.some((term) => normalizedSetName.includes(term))) {
     return false;
   }
 
-  return (
-    /^(bw|xy|sm|swsh|sv|me)/.test(normalizedSetId) ||
-    new Set(['g1', 'cel25']).has(normalizedSetId)
-  );
+  return Boolean(setId.trim() && normalizedSetName.length >= 3);
 }
 
 function dedupeByTrackedId(items: DerivedEtbCandidate[]) {

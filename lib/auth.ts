@@ -126,7 +126,10 @@ function isTransientDatabaseError(error: unknown) {
   return (
     error.name === 'PrismaClientInitializationError' ||
     message.includes("can't reach database server") ||
-    message.includes('connection') ||
+    message.includes('connection reset') ||
+    message.includes('connection refused') ||
+    message.includes('connection terminated') ||
+    message.includes('too many connections') ||
     message.includes('timeout') ||
     message.includes('timed out')
   );
@@ -211,10 +214,7 @@ export async function getCurrentUser() {
   }
 
   try {
-    const user = await getCurrentUserFromDatabase(session);
-    if (user) {
-      return user;
-    }
+    return await getCurrentUserFromDatabase(session);
   } catch (error) {
     if (!isTransientDatabaseError(error)) {
       throw error;

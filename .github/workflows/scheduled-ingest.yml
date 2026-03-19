@@ -1,5 +1,9 @@
 name: Scheduled Ingest
 
+concurrency:
+  group: scheduled-ingest
+  cancel-in-progress: false
+
 on:
   schedule:
     - cron: '0 */2 * * *'

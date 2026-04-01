@@ -3,6 +3,7 @@ import { normalizeCardImageUrl } from './cardImages';
 import { ensureEtbDisplayName } from './etbTracking';
 import { buildEbayEtbSearchQuery, buildEbaySearchQuery } from './ebaySearch';
 import { deriveEtbCatalogCandidates } from './etbCatalog';
+import { fetchWithRetry } from './http';
 
 const TCGDEX_LANGUAGE = process.env.TCGDEX_LANGUAGE ?? 'en';
 const TCGDEX_API_URL =
@@ -217,7 +218,13 @@ export async function syncPokemonMarketData(options: SyncOptions = {}) {
     });
   }
 
-  await syncEtbCatalog(ETB_CATALOG_SYNC_LIMIT);
+  try {
+    await syncEtbCatalog(ETB_CATALOG_SYNC_LIMIT);
+  } catch (error) {
+    console.warn('[Ingestion Tracker] ETB catalog sync skipped after fetch failure', {
+      error: error instanceof Error ? error.message : 'Unknown ETB catalog sync error',
+    });
+  }
   const etbResults = await syncTrackedEtbs(etbLimit);
 
   console.log('[Ingestion Tracker] TCGdex sync complete!');
@@ -424,7 +431,9 @@ async function fetchTcgdexCards(limit: number): Promise<TcgdexCard[]> {
       url.searchParams.set('name', TCGDEX_NAME_QUERY);
     }
 
-    const response = await fetch(url.toString(), { cache: 'no-store' });
+    const response = await fetchWithRetry(url.toString(), { cache: 'no-store' }, {
+      label: `TCGdex cards page ${page}`,
+    });
 
     if (!response.ok) {
       throw new Error(
@@ -451,10 +460,8 @@ async function fetchTcgdexCards(limit: number): Promise<TcgdexCard[]> {
 
   for (let i = 0; i < selected.length; i += TCGDEX_DETAIL_BATCH_SIZE) {
     const batch = selected.slice(i, i + TCGDEX_DETAIL_BATCH_SIZE);
-    const detailedBatch = await Promise.all(
-      batch.map((card) => fetchTcgdexCard(card.id)),
-    );
-    cards.push(...detailedBatch);
+    const detailedBatch = await Promise.allSettled(batch.map((card) => fetchTcgdexCard(card.id)));
+    cards.push(...unwrapTcgdexBatch(detailedBatch, batch.map((card) => card.id)));
   }
 
   return cards;
@@ -465,9 +472,30 @@ async function fetchTcgdexCardsByIds(cardIds: string[]): Promise<TcgdexCard[]> {
 
   for (let index = 0; index < cardIds.length; index += TCGDEX_DETAIL_BATCH_SIZE) {
     const batch = cardIds.slice(index, index + TCGDEX_DETAIL_BATCH_SIZE);
-    const detailedBatch = await Promise.all(batch.map((cardId) => fetchTcgdexCard(cardId)));
-    cards.push(...detailedBatch);
+    const detailedBatch = await Promise.allSettled(batch.map((cardId) => fetchTcgdexCard(cardId)));
+    cards.push(...unwrapTcgdexBatch(detailedBatch, batch));
   }
+
+  return cards;
+}
+
+function unwrapTcgdexBatch(
+  results: PromiseSettledResult<TcgdexCard>[],
+  cardIds: string[],
+): TcgdexCard[] {
+  const cards: TcgdexCard[] = [];
+
+  results.forEach((result, index) => {
+    if (result.status === 'fulfilled') {
+      cards.push(result.value);
+      return;
+    }
+
+    console.warn('[Ingestion Tracker] Failed to fetch TCGdex card', {
+      cardId: cardIds[index] ?? 'unknown',
+      error: result.reason instanceof Error ? result.reason.message : 'Unknown fetch error',
+    });
+  });
 
   return cards;
 }
@@ -720,9 +748,15 @@ function hasTrustedEtbMarketPreview(preview: EbayMarketSnapshot | null) {
 }
 
 async function fetchTcgdexCard(cardId: string): Promise<TcgdexCard> {
-  const response = await fetch(createTcgdexUrl(['cards', cardId]), {
-    cache: 'no-store',
-  });
+  const response = await fetchWithRetry(
+    createTcgdexUrl(['cards', cardId]),
+    {
+      cache: 'no-store',
+    },
+    {
+      label: `TCGdex card ${cardId}`,
+    },
+  );
 
   if (!response.ok) {
     throw new Error(
@@ -901,12 +935,14 @@ async function fetchEbayMarketSnapshot({
     url.searchParams.set('sort', 'price');
     url.searchParams.set('filter', 'buyingOptions:{FIXED_PRICE}');
 
-    const res = await fetch(url.toString(), {
+    const res = await fetchWithRetry(url.toString(), {
       headers: {
         Authorization: `Bearer ${accessToken}`,
         'Content-Type': 'application/json',
         'X-EBAY-C-MARKETPLACE-ID': EBAY_MARKETPLACE_ID,
       },
+    }, {
+      label: `eBay browse search ${query}`,
     });
 
     if (!res.ok) {
@@ -1309,14 +1345,20 @@ async function getEbayApplicationToken() {
     scope: 'https://api.ebay.com/oauth/api_scope',
   });
 
-  const response = await fetch(`${getEbayIdentityBaseUrl()}/identity/v1/oauth2/token`, {
-    method: 'POST',
-    headers: {
-      Authorization: `Basic ${basicAuth}`,
-      'Content-Type': 'application/x-www-form-urlencoded',
+  const response = await fetchWithRetry(
+    `${getEbayIdentityBaseUrl()}/identity/v1/oauth2/token`,
+    {
+      method: 'POST',
+      headers: {
+        Authorization: `Basic ${basicAuth}`,
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+      body: body.toString(),
     },
-    body: body.toString(),
-  });
+    {
+      label: 'eBay application token',
+    },
+  );
 
   if (!response.ok) {
     console.log('[eBay] token HTTP error', response.status);

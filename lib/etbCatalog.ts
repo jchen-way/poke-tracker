@@ -1,5 +1,6 @@
 import prisma from './prisma';
 import { buildEtbTrackedId, ensureEtbDisplayName } from './etbTracking';
+import { fetchWithRetry } from './http';
 
 export type KnownEtb = {
   trackedId: string;
@@ -93,9 +94,15 @@ export async function findKnownEtbByTrackedId(trackedId: string) {
 export async function deriveEtbCatalogCandidates() {
   try {
     const url = new URL('sets', ensureTrailingSlash(TCGDEX_API_URL));
-    const response = await fetch(url.toString(), {
-      cache: 'no-store',
-    });
+    const response = await fetchWithRetry(
+      url.toString(),
+      {
+        cache: 'no-store',
+      },
+      {
+        label: 'TCGdex ETB set catalog',
+      },
+    );
 
     if (!response.ok) {
       return [] as DerivedEtbCandidate[];
